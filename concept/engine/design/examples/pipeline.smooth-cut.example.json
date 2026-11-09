@@ -1,0 +1,41 @@
+{
+  "schema_version": "1.0",
+  "id": "smooth-cut",
+  "name": "Smooth cut contours",
+  "description": "Fillet corners, lightly smooth, simplify, then densify for export.",
+  "operations": [
+    {
+      "method": "fillet_corners",
+      "params": {
+        "radius_mm": 8.0,
+        "min_turn_deg": 20.0,
+        "arc_segments": 4,
+        "mode": "error"
+      }
+    },
+    {
+      "method": "smooth",
+      "params": {
+        "algorithm": "chaikin",
+        "iterations": 1,
+        "preserve_corners_deg": 70.0,
+        "max_deviation_mm": 0.2
+      }
+    },
+    {
+      "method": "simplify",
+      "params": {
+        "tolerance_mm": 0.05,
+        "preserve_corners_deg": 70.0
+      }
+    },
+    {
+      "method": "densify",
+      "params": {
+        "max_spacing_mm": 2.0,
+        "max_angle_step_deg": 12.0,
+        "chord_tolerance_mm": 0.05
+      }
+    }
+  ]
+}

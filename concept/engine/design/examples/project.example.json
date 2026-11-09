@@ -1,0 +1,44 @@
+{
+  "schema_version": "1.0",
+  "project_id": "demo-lamp",
+  "name": "Demo lamp shell",
+  "source": {
+    "host": "blender",
+    "mesh_ref": "LampShell",
+    "host_units": "m",
+    "mesh_hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "slice_plan": {
+    "mode": "planar_stack",
+    "origin_mm": [0, 0, 0],
+    "axis": [0, 0, 1],
+    "count": 2,
+    "spacing_mm": 12.0,
+    "offset_mm": 0.0,
+    "u_hint": [1, 0, 0]
+  },
+  "material": {
+    "preset_id": "pla-3mm",
+    "overrides": {}
+  },
+  "pipeline": {
+    "preset_id": "smooth-cut",
+    "overrides": {
+      "fillet_corners.radius_mm": 8.0
+    }
+  },
+  "targets": {
+    "roles": ["cut"],
+    "tags_all": ["outer"]
+  },
+  "export": {
+    "formats": ["svg"],
+    "dir": "./out",
+    "unit": "mm",
+    "naming": "{project}/{slice_index:03d}"
+  },
+  "ui": {
+    "schema_id": "preview/main",
+    "last_panel": "processing"
+  }
+}

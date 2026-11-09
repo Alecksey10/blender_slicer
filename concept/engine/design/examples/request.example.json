@@ -1,0 +1,218 @@
+{
+  "schema_version": "1.0",
+  "protocol_version": "1.0",
+  "request_id": "req-demo-0001",
+  "units": "mm",
+  "material": {
+    "id": "pla-3mm",
+    "name": "PLA sheet 3 mm",
+    "thickness_mm": 3.0,
+    "min_bend_radius_mm": 6.0,
+    "max_bend_angle_deg": 120.0,
+    "min_segment_mm": 0.4,
+    "kerf_mm": 0.15,
+    "k_factor": 0.42,
+    "extra": {
+      "density_g_cm3": 1.24
+    }
+  },
+  "operations": [
+    {
+      "method": "fillet_corners",
+      "params": {
+        "radius_mm": 8.0,
+        "min_turn_deg": 20.0,
+        "arc_segments": 3,
+        "mode": "error"
+      }
+    }
+  ],
+  "targets": {
+    "slice_ids": [
+      "s0",
+      "s1"
+    ],
+    "roles": [
+      "cut"
+    ],
+    "tags_all": [
+      "outer"
+    ]
+  },
+  "failure_policy": "per_slice",
+  "options": {
+    "return_unchanged": true,
+    "include_metrics": true,
+    "normalize_winding": true
+  },
+  "limits": {
+    "max_slices": 64,
+    "max_points_per_contour": 200000,
+    "max_total_points": 1000000,
+    "max_operations": 16
+  },
+  "slices": [
+    {
+      "id": "s0",
+      "index": 0,
+      "frame_id": "f0",
+      "metadata": {
+        "layer_z_mm": 0.0
+      },
+      "contours": [
+        {
+          "id": "s0.c0",
+          "role": "cut",
+          "closed": true,
+          "parent_id": null,
+          "points": [
+            [
+              0.0,
+              0.0
+            ],
+            [
+              60.0,
+              0.0
+            ],
+            [
+              60.0,
+              40.0
+            ],
+            [
+              0.0,
+              40.0
+            ]
+          ],
+          "tags": [
+            "outer"
+          ],
+          "segment_tags": [
+            "edge",
+            "edge",
+            "edge",
+            "edge"
+          ]
+        },
+        {
+          "id": "s0.c1",
+          "role": "cut",
+          "closed": true,
+          "parent_id": "s0.c0",
+          "points": [
+            [
+              22.0,
+              12.0
+            ],
+            [
+              22.0,
+              28.0
+            ],
+            [
+              38.0,
+              28.0
+            ],
+            [
+              38.0,
+              12.0
+            ]
+          ],
+          "tags": [
+            "hole"
+          ],
+          "segment_tags": [
+            "edge",
+            "edge",
+            "edge",
+            "edge"
+          ]
+        },
+        {
+          "id": "s0.c2",
+          "role": "score",
+          "closed": false,
+          "parent_id": null,
+          "points": [
+            [
+              5.0,
+              5.0
+            ],
+            [
+              20.0,
+              4.0
+            ],
+            [
+              35.0,
+              6.0
+            ],
+            [
+              55.0,
+              5.0
+            ]
+          ],
+          "tags": [
+            "fold"
+          ],
+          "segment_tags": [
+            "score",
+            "score",
+            "score"
+          ],
+          "fold": {
+            "angle_deg": 90.0,
+            "direction": "up",
+            "radius_mm": 8.0
+          }
+        }
+      ]
+    },
+    {
+      "id": "s1",
+      "index": 1,
+      "frame_id": "f1",
+      "metadata": {
+        "layer_z_mm": 12.0
+      },
+      "contours": [
+        {
+          "id": "s1.c0",
+          "role": "cut",
+          "closed": true,
+          "parent_id": null,
+          "points": [
+            [
+              10.0,
+              10.0
+            ],
+            [
+              11.2,
+              10.0
+            ],
+            [
+              11.2,
+              30.0
+            ],
+            [
+              10.0,
+              30.0
+            ]
+          ],
+          "tags": [
+            "outer",
+            "thin"
+          ],
+          "segment_tags": [
+            "edge",
+            "edge",
+            "edge",
+            "edge"
+          ]
+        }
+      ]
+    }
+  ],
+  "metadata": {
+    "project_id": "demo-lamp",
+    "pipeline_id": "fillet-only-demo",
+    "host": "blender"
+  }
+}

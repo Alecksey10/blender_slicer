@@ -1,0 +1,71 @@
+{
+  "schema_version": "1.0",
+  "id": "preview/main",
+  "title": "Slice Engine",
+  "layout": {
+    "type": "panel",
+    "children": [
+      {
+        "type": "group",
+        "title": "Material",
+        "children": [
+          {
+            "type": "select",
+            "bind": "project.material.preset_id",
+            "source": "materials",
+            "label": "Preset"
+          },
+          {
+            "type": "number",
+            "bind": "material.thickness_mm",
+            "label": "Thickness",
+            "unit": "mm",
+            "step": 0.1
+          }
+        ]
+      },
+      {
+        "type": "group",
+        "title": "Processing",
+        "children": [
+          {
+            "type": "method_form",
+            "method": "fillet_corners",
+            "bind": "pipeline.operations[0].params"
+          },
+          {
+            "type": "method_form",
+            "method": "smooth",
+            "bind": "pipeline.operations[1].params"
+          }
+        ]
+      },
+      {
+        "type": "row",
+        "children": [
+          {
+            "type": "button",
+            "label": "Preview",
+            "event": "preview.requested"
+          },
+          {
+            "type": "button",
+            "label": "Apply",
+            "event": "process.requested"
+          }
+        ]
+      }
+    ]
+  },
+  "events": {
+    "preview.requested": {
+      "action": "engine.process",
+      "debounce_ms": 150,
+      "target": "preview"
+    },
+    "project.changed": {
+      "action": "runtime.invalidate",
+      "targets": ["preview", "result"]
+    }
+  }
+}

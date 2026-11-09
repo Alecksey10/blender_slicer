@@ -1,0 +1,303 @@
+{
+  "schema_version": "1.0",
+  "protocol_version": "1.0",
+  "request_id": "req-demo-0001",
+  "status": "partial",
+  "units": "mm",
+  "engine": {
+    "name": "slicer-engine",
+    "version": "0.1.0",
+    "protocol_version": "1.0"
+  },
+  "slices": [
+    {
+      "slice_id": "s0",
+      "index": 0,
+      "frame_id": "f0",
+      "changed": true,
+      "contours": [
+        {
+          "id": "s0.c0",
+          "source_id": "s0.c0",
+          "role": "cut",
+          "closed": true,
+          "parent_id": null,
+          "tags": [
+            "outer"
+          ],
+          "fold": null,
+          "changed": true,
+          "segment_tags": null,
+          "points": [
+            [
+              0.0,
+              8.0
+            ],
+            [
+              1.0717967697244895,
+              4.000000000000002
+            ],
+            [
+              3.9999999999999964,
+              1.0717967697244921
+            ],
+            [
+              7.999999999999998,
+              -8.881784197001252e-16
+            ],
+            [
+              52.0,
+              0.0
+            ],
+            [
+              56.0,
+              1.0717967697244903
+            ],
+            [
+              58.92820323027551,
+              4.0
+            ],
+            [
+              60.0,
+              8.0
+            ],
+            [
+              60.0,
+              32.0
+            ],
+            [
+              58.92820323027551,
+              36.0
+            ],
+            [
+              56.0,
+              38.92820323027551
+            ],
+            [
+              52.0,
+              40.0
+            ],
+            [
+              8.0,
+              40.0
+            ],
+            [
+              4.000000000000001,
+              38.92820323027551
+            ],
+            [
+              1.0717967697244912,
+              36.0
+            ],
+            [
+              -8.881784197001252e-16,
+              32.0
+            ]
+          ],
+          "metrics": {
+            "input_points": 4,
+            "output_points": 16,
+            "min_radius_mm": 8.0,
+            "max_turn_deg": 30.0,
+            "max_source_deviation_mm": 3.313708,
+            "length_mm": 186.265482,
+            "self_intersections": 0
+          }
+        },
+        {
+          "id": "s0.c1",
+          "source_id": "s0.c1",
+          "role": "cut",
+          "closed": true,
+          "parent_id": "s0.c0",
+          "tags": [
+            "hole"
+          ],
+          "fold": null,
+          "changed": false,
+          "segment_tags": [
+            "edge",
+            "edge",
+            "edge",
+            "edge"
+          ],
+          "points": [
+            [
+              22.0,
+              12.0
+            ],
+            [
+              22.0,
+              28.0
+            ],
+            [
+              38.0,
+              28.0
+            ],
+            [
+              38.0,
+              12.0
+            ]
+          ],
+          "metrics": {
+            "input_points": 4,
+            "output_points": 4,
+            "min_radius_mm": null,
+            "max_turn_deg": 90.0,
+            "max_source_deviation_mm": 0.0,
+            "length_mm": 64.0,
+            "self_intersections": 0
+          }
+        },
+        {
+          "id": "s0.c2",
+          "source_id": "s0.c2",
+          "role": "score",
+          "closed": false,
+          "parent_id": null,
+          "tags": [
+            "fold"
+          ],
+          "fold": {
+            "angle_deg": 90.0,
+            "direction": "up",
+            "radius_mm": 8.0
+          },
+          "changed": false,
+          "segment_tags": [
+            "score",
+            "score",
+            "score"
+          ],
+          "points": [
+            [
+              5.0,
+              5.0
+            ],
+            [
+              20.0,
+              4.0
+            ],
+            [
+              35.0,
+              6.0
+            ],
+            [
+              55.0,
+              5.0
+            ]
+          ],
+          "metrics": {
+            "input_points": 4,
+            "output_points": 4,
+            "min_radius_mm": null,
+            "max_turn_deg": 0.0,
+            "max_source_deviation_mm": 0.0,
+            "length_mm": 50.249379,
+            "self_intersections": 0
+          }
+        }
+      ],
+      "metrics": {
+        "input_points": 12,
+        "output_points": 24,
+        "input_contours": 3,
+        "output_contours": 3,
+        "stage_durations_ms": {
+          "fillet_corners": 0.0
+        }
+      },
+      "diagnostics": []
+    },
+    {
+      "slice_id": "s1",
+      "index": 1,
+      "frame_id": "f1",
+      "changed": false,
+      "contours": [
+        {
+          "id": "s1.c0",
+          "source_id": "s1.c0",
+          "role": "cut",
+          "closed": true,
+          "parent_id": null,
+          "tags": [
+            "outer",
+            "thin"
+          ],
+          "fold": null,
+          "changed": false,
+          "segment_tags": [
+            "edge",
+            "edge",
+            "edge",
+            "edge"
+          ],
+          "points": [
+            [
+              10.0,
+              10.0
+            ],
+            [
+              11.2,
+              10.0
+            ],
+            [
+              11.2,
+              30.0
+            ],
+            [
+              10.0,
+              30.0
+            ]
+          ],
+          "metrics": {
+            "input_points": 4,
+            "output_points": 4,
+            "min_radius_mm": null,
+            "max_turn_deg": 90.0,
+            "max_source_deviation_mm": 0.0,
+            "length_mm": 41.2,
+            "self_intersections": 0
+          }
+        }
+      ],
+      "metrics": {
+        "input_points": 4,
+        "output_points": 4,
+        "input_contours": 1,
+        "output_contours": 1,
+        "stage_durations_ms": {}
+      },
+      "diagnostics": [
+        {
+          "severity": "error",
+          "code": "E_CONSTRAINT_UNSATISFIED",
+          "message": "Required fillet radius 8.0 mm exceeds available 0.6 mm",
+          "stage": "fillet_corners",
+          "slice_id": "s1",
+          "contour_id": "s1.c0",
+          "point_index": 0,
+          "details": {
+            "requested_radius_mm": 8.0,
+            "available_radius_mm": 0.6,
+            "mode": "error"
+          }
+        }
+      ]
+    }
+  ],
+  "diagnostics": [],
+  "metrics": {
+    "slices_in": 2,
+    "slices_ok": 1,
+    "slices_failed": 1,
+    "points_in": 16,
+    "points_out": 28
+  },
+  "metadata": {
+    "project_id": "demo-lamp",
+    "pipeline_id": "fillet-only-demo",
+    "host": "blender"
+  }
+}

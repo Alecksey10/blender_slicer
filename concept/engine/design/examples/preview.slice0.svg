@@ -1,0 +1,126 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1180" height="590" viewBox="0 0 1180 590" font-family="Inter, Segoe UI, Arial, sans-serif">
+<rect width="100%" height="100%" fill="#fbfbfd"/>
+<text x="24" y="34" font-size="20" font-weight="700" fill="#16181d">Slice preview — demo-lamp / request req-demo-0001</text>
+<text x="24" y="54" font-size="12" fill="#666b76">2D contours, mm · engine slicer-engine 0.1.0 · protocol 1.0 · status: partial</text>
+<line x1="760" y1="24" x2="788" y2="24" stroke="#1f77b4" stroke-width="2.4"/>
+<text x="796" y="28" font-size="12" fill="#3a3f49">cut</text>
+<line x1="960" y1="24" x2="988" y2="24" stroke="#ff7f0e" stroke-width="2.4" stroke-dasharray="5 4"/>
+<text x="996" y="28" font-size="12" fill="#3a3f49">score / fold</text>
+<line x1="760" y1="44" x2="788" y2="44" stroke="#9aa0aa" stroke-width="2.4" stroke-dasharray="5 4"/>
+<text x="796" y="48" font-size="12" fill="#3a3f49">input (overlay)</text>
+<line x1="960" y1="44" x2="988" y2="44" stroke="#d62728" stroke-width="2.4"/>
+<text x="996" y="48" font-size="12" fill="#3a3f49">error</text>
+<rect x="20" y="74" width="360" height="340" rx="10" fill="#ffffff" stroke="#e3e5ea"/>
+<text x="36" y="100" font-size="14" font-weight="650" fill="#22252b">Slice s0 — input</text>
+<text x="36" y="118" font-size="11.5" fill="#7a808b">12 points · 3 contours · 60 × 40 mm</text>
+<line x1="59.43" y1="130" x2="59.43" y2="394" stroke="#eef0f4" stroke-width="1"/>
+<text x="61.43" y="406" font-size="9" fill="#a0a5ae">0</text>
+<line x1="106.29" y1="130" x2="106.29" y2="394" stroke="#eef0f4" stroke-width="1"/>
+<text x="108.29" y="406" font-size="9" fill="#a0a5ae">10</text>
+<line x1="153.14" y1="130" x2="153.14" y2="394" stroke="#eef0f4" stroke-width="1"/>
+<text x="155.14" y="406" font-size="9" fill="#a0a5ae">20</text>
+<line x1="200.00" y1="130" x2="200.00" y2="394" stroke="#eef0f4" stroke-width="1"/>
+<text x="202.00" y="406" font-size="9" fill="#a0a5ae">30</text>
+<line x1="246.86" y1="130" x2="246.86" y2="394" stroke="#eef0f4" stroke-width="1"/>
+<text x="248.86" y="406" font-size="9" fill="#a0a5ae">40</text>
+<line x1="293.71" y1="130" x2="293.71" y2="394" stroke="#eef0f4" stroke-width="1"/>
+<text x="295.71" y="406" font-size="9" fill="#a0a5ae">50</text>
+<line x1="340.57" y1="130" x2="340.57" y2="394" stroke="#eef0f4" stroke-width="1"/>
+<text x="342.57" y="406" font-size="9" fill="#a0a5ae">60</text>
+<line x1="36" y1="355.71" x2="364" y2="355.71" stroke="#eef0f4" stroke-width="1"/>
+<text x="22" y="358.71" font-size="9" fill="#a0a5ae">0</text>
+<line x1="36" y1="308.86" x2="364" y2="308.86" stroke="#eef0f4" stroke-width="1"/>
+<text x="22" y="311.86" font-size="9" fill="#a0a5ae">10</text>
+<line x1="36" y1="262.00" x2="364" y2="262.00" stroke="#eef0f4" stroke-width="1"/>
+<text x="22" y="265.00" font-size="9" fill="#a0a5ae">20</text>
+<line x1="36" y1="215.14" x2="364" y2="215.14" stroke="#eef0f4" stroke-width="1"/>
+<text x="22" y="218.14" font-size="9" fill="#a0a5ae">30</text>
+<line x1="36" y1="168.29" x2="364" y2="168.29" stroke="#eef0f4" stroke-width="1"/>
+<text x="22" y="171.29" font-size="9" fill="#a0a5ae">40</text>
+<polygon points="59.429,355.714 340.571,355.714 340.571,168.286 59.429,168.286" fill="none" stroke="#1f77b4" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round"/>
+<polygon points="162.514,299.486 162.514,224.514 237.486,224.514 237.486,299.486" fill="none" stroke="#1f77b4" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round"/>
+<polyline points="82.857,332.286 153.143,336.971 223.429,327.600 317.143,332.286" fill="none" stroke="#ff7f0e" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="6 4"/>
+<rect x="400" y="74" width="360" height="340" rx="10" fill="#ffffff" stroke="#e3e5ea"/>
+<text x="416" y="100" font-size="14" font-weight="650" fill="#22252b">Slice s0 — output</text>
+<text x="416" y="118" font-size="11.5" fill="#7a808b">fillet_corners R8 · 3 arc segments · 24 points</text>
+<line x1="439.43" y1="130" x2="439.43" y2="394" stroke="#eef0f4" stroke-width="1"/>
+<text x="441.43" y="406" font-size="9" fill="#a0a5ae">0</text>
+<line x1="486.29" y1="130" x2="486.29" y2="394" stroke="#eef0f4" stroke-width="1"/>
+<text x="488.29" y="406" font-size="9" fill="#a0a5ae">10</text>
+<line x1="533.14" y1="130" x2="533.14" y2="394" stroke="#eef0f4" stroke-width="1"/>
+<text x="535.14" y="406" font-size="9" fill="#a0a5ae">20</text>
+<line x1="580.00" y1="130" x2="580.00" y2="394" stroke="#eef0f4" stroke-width="1"/>
+<text x="582.00" y="406" font-size="9" fill="#a0a5ae">30</text>
+<line x1="626.86" y1="130" x2="626.86" y2="394" stroke="#eef0f4" stroke-width="1"/>
+<text x="628.86" y="406" font-size="9" fill="#a0a5ae">40</text>
+<line x1="673.71" y1="130" x2="673.71" y2="394" stroke="#eef0f4" stroke-width="1"/>
+<text x="675.71" y="406" font-size="9" fill="#a0a5ae">50</text>
+<line x1="720.57" y1="130" x2="720.57" y2="394" stroke="#eef0f4" stroke-width="1"/>
+<text x="722.57" y="406" font-size="9" fill="#a0a5ae">60</text>
+<line x1="416" y1="355.71" x2="744" y2="355.71" stroke="#eef0f4" stroke-width="1"/>
+<text x="402" y="358.71" font-size="9" fill="#a0a5ae">0</text>
+<line x1="416" y1="308.86" x2="744" y2="308.86" stroke="#eef0f4" stroke-width="1"/>
+<text x="402" y="311.86" font-size="9" fill="#a0a5ae">10</text>
+<line x1="416" y1="262.00" x2="744" y2="262.00" stroke="#eef0f4" stroke-width="1"/>
+<text x="402" y="265.00" font-size="9" fill="#a0a5ae">20</text>
+<line x1="416" y1="215.14" x2="744" y2="215.14" stroke="#eef0f4" stroke-width="1"/>
+<text x="402" y="218.14" font-size="9" fill="#a0a5ae">30</text>
+<line x1="416" y1="168.29" x2="744" y2="168.29" stroke="#eef0f4" stroke-width="1"/>
+<text x="402" y="171.29" font-size="9" fill="#a0a5ae">40</text>
+<polygon points="439.429,355.714 720.571,355.714 720.571,168.286 439.429,168.286" fill="none" stroke="#b9bec7" stroke-width="1.4" stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="4 4"/>
+<polygon points="542.514,299.486 542.514,224.514 617.486,224.514 617.486,299.486" fill="none" stroke="#b9bec7" stroke-width="1.4" stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="4 4"/>
+<polyline points="462.857,332.286 533.143,336.971 603.429,327.600 697.143,332.286" fill="none" stroke="#b9bec7" stroke-width="1.4" stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="4 4"/>
+<polygon points="439.429,318.229 444.451,336.971 458.171,350.692 476.914,355.714 683.086,355.714 701.829,350.692 715.549,336.971 720.571,318.229 720.571,205.771 715.549,187.029 701.829,173.308 683.086,168.286 476.914,168.286 458.171,173.308 444.451,187.029 439.429,205.771" fill="none" stroke="#1f77b4" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round"/>
+<circle cx="439.429" cy="318.229" r="2.1" fill="#ffffff" stroke="#1f77b4" stroke-width="1.2"/>
+<circle cx="444.451" cy="336.971" r="2.1" fill="#ffffff" stroke="#1f77b4" stroke-width="1.2"/>
+<circle cx="458.171" cy="350.692" r="2.1" fill="#ffffff" stroke="#1f77b4" stroke-width="1.2"/>
+<circle cx="476.914" cy="355.714" r="2.1" fill="#ffffff" stroke="#1f77b4" stroke-width="1.2"/>
+<circle cx="683.086" cy="355.714" r="2.1" fill="#ffffff" stroke="#1f77b4" stroke-width="1.2"/>
+<circle cx="701.829" cy="350.692" r="2.1" fill="#ffffff" stroke="#1f77b4" stroke-width="1.2"/>
+<circle cx="715.549" cy="336.971" r="2.1" fill="#ffffff" stroke="#1f77b4" stroke-width="1.2"/>
+<circle cx="720.571" cy="318.229" r="2.1" fill="#ffffff" stroke="#1f77b4" stroke-width="1.2"/>
+<circle cx="720.571" cy="205.771" r="2.1" fill="#ffffff" stroke="#1f77b4" stroke-width="1.2"/>
+<circle cx="715.549" cy="187.029" r="2.1" fill="#ffffff" stroke="#1f77b4" stroke-width="1.2"/>
+<circle cx="701.829" cy="173.308" r="2.1" fill="#ffffff" stroke="#1f77b4" stroke-width="1.2"/>
+<circle cx="683.086" cy="168.286" r="2.1" fill="#ffffff" stroke="#1f77b4" stroke-width="1.2"/>
+<circle cx="476.914" cy="168.286" r="2.1" fill="#ffffff" stroke="#1f77b4" stroke-width="1.2"/>
+<circle cx="458.171" cy="173.308" r="2.1" fill="#ffffff" stroke="#1f77b4" stroke-width="1.2"/>
+<circle cx="444.451" cy="187.029" r="2.1" fill="#ffffff" stroke="#1f77b4" stroke-width="1.2"/>
+<circle cx="439.429" cy="205.771" r="2.1" fill="#ffffff" stroke="#1f77b4" stroke-width="1.2"/>
+<polygon points="542.514,299.486 542.514,224.514 617.486,224.514 617.486,299.486" fill="none" stroke="#1f77b4" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round"/>
+<polyline points="462.857,332.286 533.143,336.971 603.429,327.600 697.143,332.286" fill="none" stroke="#ff7f0e" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="6 4"/>
+<rect x="780" y="74" width="380" height="340" rx="10" fill="#ffffff" stroke="#e3e5ea"/>
+<text x="796" y="100" font-size="14" font-weight="650" fill="#22252b">Slice s1 — rejected</text>
+<text x="796" y="118" font-size="11.5" fill="#7a808b">thin wall 1.2 mm · available R0.6 &lt; required R8</text>
+<line x1="833.71" y1="130" x2="833.71" y2="394" stroke="#eef0f4" stroke-width="1"/>
+<text x="835.71" y="406" font-size="9" fill="#a0a5ae">10</text>
+<line x1="796" y1="356.29" x2="1144" y2="356.29" stroke="#eef0f4" stroke-width="1"/>
+<text x="782" y="359.29" font-size="9" fill="#a0a5ae">10</text>
+<line x1="796" y1="262.00" x2="1144" y2="262.00" stroke="#eef0f4" stroke-width="1"/>
+<text x="782" y="265.00" font-size="9" fill="#a0a5ae">20</text>
+<line x1="796" y1="167.71" x2="1144" y2="167.71" stroke="#eef0f4" stroke-width="1"/>
+<text x="782" y="170.71" font-size="9" fill="#a0a5ae">30</text>
+<polygon points="833.714,356.286 845.029,356.286 845.029,167.714 833.714,167.714" fill="none" stroke="#d62728" stroke-width="3.0" stroke-linejoin="round" stroke-linecap="round"/>
+<text x="951" y="250.0" font-size="10.5" fill="#d62728" font-weight="650">E_CONSTRAINT_UNSATISFIED</text>
+<text x="951" y="270.0" font-size="11" fill="#666b76">requested R8.0 mm</text>
+<text x="951" y="286.0" font-size="11" fill="#666b76">available R0.6 mm</text>
+<text x="951" y="302.0" font-size="11" fill="#666b76">slice returned unchanged</text>
+<line x1="946" y1="256.0" x2="851" y2="280.0" stroke="#d62728" stroke-width="1"/>
+<circle cx="851" cy="280.0" r="4" fill="#d62728"/>
+<rect x="20" y="440" width="1140" height="126" rx="10" fill="#ffffff" stroke="#e3e5ea"/>
+<text x="36" y="466" font-size="13" font-weight="650" fill="#22252b">Metrics</text>
+<text x="36" y="492" font-size="11" fill="#7a808b">points in → out</text>
+<text x="186" y="492" font-size="12.5" font-weight="600" fill="#22252b">16 → 28</text>
+<text x="406" y="492" font-size="11" fill="#7a808b">min radius</text>
+<text x="556" y="492" font-size="12.5" font-weight="600" fill="#22252b">8.0 mm</text>
+<text x="776" y="492" font-size="11" fill="#7a808b">max turn (arc step)</text>
+<text x="926" y="492" font-size="12.5" font-weight="600" fill="#22252b">30°</text>
+<text x="36" y="526" font-size="11" fill="#7a808b">source deviation</text>
+<text x="186" y="526" font-size="12.5" font-weight="600" fill="#22252b">3.314 mm</text>
+<text x="406" y="526" font-size="11" fill="#7a808b">length s0 outer</text>
+<text x="556" y="526" font-size="12.5" font-weight="600" fill="#22252b">186.265 mm</text>
+<text x="776" y="526" font-size="11" fill="#7a808b">slices</text>
+<text x="926" y="526" font-size="12.5" font-weight="600" fill="#22252b">1 ok / 1 failed</text>
+<text x="36" y="558" font-size="10.5" fill="#8a909a">Source deviation for fillets is intentional: a sharp 90° corner replaced by R8 arc deviates up to R·(√2−1).</text>
+<text x="760" y="558" font-size="10.5" fill="#8a909a">Generated by slicer_preview · no external libraries</text>
+</svg>
