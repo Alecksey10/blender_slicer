@@ -24,7 +24,7 @@ from blender_slicer.core.types import (  # noqa: E402
     ResultStatus,
 )
 from blender_slicer.host import adapter, slicing  # noqa: E402
-from blender_slicer.host.runtime import RUNTIME  # noqa: E402
+from blender_slicer.adapters.base.runtime import RUNTIME  # noqa: E402
 
 CUBE_HALF_MM = 500.0
 
@@ -167,7 +167,7 @@ class PanelDrawTests(unittest.TestCase):
             self.assertIn(operator, operators)
 
     def test_every_schema_section_is_a_sub_panel_of_main(self):
-        from blender_slicer.host.ui_schema import SECTIONS
+        from blender_slicer.adapters.blender.ui_schema import SECTIONS
 
         labels = [cls.bl_label for cls in self.panels.SECTION_PANELS]
         self.assertEqual(labels, [section["title"] for section in SECTIONS])
@@ -215,8 +215,8 @@ class SettingsCoverageTests(unittest.TestCase):
     """Guards against GUI, export and adapter drifting apart."""
 
     def test_ui_schema_refers_to_real_properties(self):
-        from blender_slicer.host.properties import SlicerSettings
-        from blender_slicer.host.ui_schema import SECTIONS
+        from blender_slicer.adapters.blender.properties import SlicerSettings
+        from blender_slicer.adapters.blender.ui_schema import SECTIONS
 
         annotations = SlicerSettings.__annotations__
         for section in SECTIONS:
@@ -242,7 +242,7 @@ class SettingsCoverageTests(unittest.TestCase):
 
     def test_every_editable_setting_is_exported(self):
         from blender_slicer.host import settings_io
-        from blender_slicer.host.properties import SlicerSettings
+        from blender_slicer.adapters.blender.properties import SlicerSettings
 
         internal = {
             "source_object",

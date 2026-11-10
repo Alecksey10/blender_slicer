@@ -1,0 +1,3 @@
+
+class Invariants:
+    pass

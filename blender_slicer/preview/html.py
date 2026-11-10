@@ -1,0 +1,1 @@
+# Preview renderer (HTML / contact sheet) - prototype stage.

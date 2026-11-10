@@ -26,7 +26,7 @@ from blender_slicer.core import (
     result_to_dict,
 )
 
-EXAMPLES = Path(__file__).resolve().parent.parent / "concept" / "engine" / "design" / "examples"
+EXAMPLES = Path(__file__).resolve().parent.parent / "docs" / "architecture" / "examples"
 
 
 def _rich_request() -> ProcessingRequest:

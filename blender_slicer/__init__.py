@@ -1,10 +1,9 @@
 """Blender addon entry point.
 
 The addon intentionally avoids importing ``bpy`` at module import time.  This
-keeps ``blender_slicer.core`` importable in a normal Python interpreter for
+keeps ``blender_slicer.protocol`` importable in a normal Python interpreter for
 unit tests.  Blender's ``bpy`` is imported lazily by ``register()``.
 """
-
 from __future__ import annotations
 
 bl_info = {
@@ -19,14 +18,12 @@ bl_info = {
 
 
 def register() -> None:
-    from .host import register as register_host
-
+    from .adapters.blender import register as register_host
     register_host()
 
 
 def unregister() -> None:
-    from .host import unregister as unregister_host
-
+    from .adapters.blender import unregister as unregister_host
     unregister_host()
 
 

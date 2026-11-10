@@ -1,0 +1,1 @@
+# Widget / Builder / GuiConfig protocol.

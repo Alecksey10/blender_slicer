@@ -1,0 +1,1 @@
+# Palette (roles / diagnostics) - prototype stage.
