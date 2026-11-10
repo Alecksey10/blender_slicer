@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import unittest
 
-from blender_slicer.core import (
+from blender_slicer.engine import (
     Contour,
     ContourRole,
     Engine,
@@ -18,7 +18,7 @@ from blender_slicer.core import (
     TargetSelector,
     dumps_result,
 )
-from blender_slicer.core.types import ErrorCode, ResultStatus, Severity
+from blender_slicer.protocol.types import ErrorCode, ResultStatus, Severity
 
 SQUARE = [(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)]
 TINY_TRIANGLE = [(0.0, 0.0), (3.0, 0.0), (0.0, 3.0)]

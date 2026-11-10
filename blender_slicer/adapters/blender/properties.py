@@ -205,6 +205,126 @@ class SlicerSettings(bpy.types.PropertyGroup):
         name="Fail if not converged", default=False, update=_mark_dirty
     )
 
+    # ------------------------------------------------------------ shrink
+    shrink_enabled: bpy.props.BoolProperty(
+        name="Shrink sections",
+        description="Narrow wide sections (tubes/wires) while keeping them smooth",
+        default=False,
+        update=_mark_dirty,
+    )
+    shrink_percent: bpy.props.FloatProperty(
+        name="Shrink (%)", default=20.0, min=0.0, max=90.0, step=1.0, update=_mark_dirty
+    )
+    shrink_mode: bpy.props.EnumProperty(
+        name="Shrink profile",
+        items=(
+            ("UNIFORM", "Uniform", "Every section shrinks by the same amount"),
+            ("MIDDLE", "Smooth middle", "Taper in and out around the middle of the pass"),
+            ("ENDS", "Smooth ends", "Shrink the ends, keep the middle"),
+        ),
+        default="MIDDLE",
+        update=_mark_dirty,
+    )
+    shrink_smooth_iterations: bpy.props.IntProperty(
+        name="Smooth iterations",
+        description="Smoothing applied after shrinking (0 keeps raw scaled points)",
+        default=2,
+        min=0,
+        max=10,
+        step=1,
+        update=_mark_dirty,
+    )
+
+    # ------------------------------------------------------------ cut offsets
+    inset_enabled: bpy.props.BoolProperty(
+        name="Cut offsets",
+        description="Give every cutting pass a signed clearance (for welding/assembly)",
+        default=False,
+        update=_mark_dirty,
+    )
+    inset_x_mode: bpy.props.EnumProperty(
+        name="X cuts",
+        items=(
+            ("NONE", "No offset", "Cut exactly on the source surface"),
+            ("OUTWARD", "Outward", "Grow the cut: this pass wraps the part"),
+            ("INWARD", "Inward", "Shrink the cut: this pass sits inside the wrap"),
+        ),
+        default="OUTWARD",
+        update=_mark_dirty,
+    )
+    inset_y_mode: bpy.props.EnumProperty(
+        name="Y cuts",
+        items=(
+            ("NONE", "No offset", "Cut exactly on the source surface"),
+            ("OUTWARD", "Outward", "Grow the cut"),
+            ("INWARD", "Inward", "Shrink the cut"),
+        ),
+        default="NONE",
+        update=_mark_dirty,
+    )
+    inset_z_mode: bpy.props.EnumProperty(
+        name="Z cuts",
+        items=(
+            ("NONE", "No offset", "Cut exactly on the source surface"),
+            ("OUTWARD", "Outward", "Grow the cut"),
+            ("INWARD", "Inward", "Shrink the cut: this pass sits inside the wrap"),
+        ),
+        default="INWARD",
+        update=_mark_dirty,
+    )
+    inset_auto: bpy.props.BoolProperty(
+        name="At least material radius",
+        description="Never offset by less than half the thickness plus kerf",
+        default=True,
+        update=_mark_dirty,
+    )
+    inset_amount_mm: bpy.props.FloatProperty(
+        name="Offset", default=0.5, min=0.0, soft_max=20.0, step=0.1, update=_mark_dirty
+    )
+
+    # ---------------------------------------------------------------- contacts
+    contacts_enabled: bpy.props.BoolProperty(
+        name="Find contacts",
+        description="Mark points where slices of different passes meet (for welding)",
+        default=False,
+        update=_mark_dirty,
+    )
+    contacts_gap_mm: bpy.props.FloatProperty(
+        name="Contact gap", default=1.0, min=0.0, soft_max=20.0, step=0.1, update=_mark_dirty
+    )
+    contact_marker_mm: bpy.props.FloatProperty(
+        name="Contact marker",
+        description=(
+            "Minimum radius of the bold contact markers in millimetres "
+            "(they also scale up with large models)"
+        ),
+        default=5.0,
+        min=0.25,
+        soft_max=20.0,
+        step=0.1,
+        update=_mark_dirty,
+    )
+    contacts_include_same: bpy.props.BoolProperty(
+        name="Same pass too", default=False, update=_mark_dirty
+    )
+
+    # ------------------------------------------------------------- performance
+    threads: bpy.props.IntProperty(
+        name="Worker threads",
+        description="0 = automatic, 1 = no multithreading",
+        default=0,
+        min=0,
+        max=64,
+        step=1,
+        update=_mark_dirty,
+    )
+    show_all_layers: bpy.props.BoolProperty(
+        name="Show all layers",
+        description="Draw every visible cutting pass at once",
+        default=True,
+        update=_mark_dirty,
+    )
+
     # ------------------------------------------------------------------ output
     build_curves: bpy.props.BoolProperty(
         name="Build result curves", default=True, update=_mark_dirty
@@ -226,6 +346,7 @@ class SlicerSettings(bpy.types.PropertyGroup):
     last_points: bpy.props.IntProperty(name="Points", default=0)
     last_errors: bpy.props.IntProperty(name="Errors", default=0)
     last_warnings: bpy.props.IntProperty(name="Warnings", default=0)
+    last_contacts: bpy.props.IntProperty(name="Contacts", default=0)
 
 
 CLASSES = (SlicerSettings,)

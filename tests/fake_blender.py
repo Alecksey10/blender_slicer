@@ -234,6 +234,23 @@ def make_settings(**overrides):
         limit_curvature_max_iterations=20,
         limit_curvature_weight=0.5,
         limit_curvature_strict=False,
+        inset_enabled=False,
+        inset_x_mode="OUTWARD",
+        inset_y_mode="NONE",
+        inset_z_mode="INWARD",
+        inset_auto=True,
+        inset_amount_mm=0.5,
+        shrink_enabled=False,
+        shrink_percent=20.0,
+        shrink_mode="MIDDLE",
+        shrink_smooth_iterations=2,
+        contacts_enabled=False,
+        contacts_gap_mm=1.0,
+        contact_marker_mm=5.0,
+        contacts_include_same=False,
+        threads=0,
+        show_all_layers=True,
+        last_contacts=0,
         build_curves=False,
         curve_radius_mm=0.15,
         check_self_intersections=True,
@@ -368,5 +385,5 @@ def uninstall() -> None:
     for name in list(sys.modules):
         if name in {"bpy", "bpy_extras", "bpy_extras.io_utils", "mathutils"}:
             del sys.modules[name]
-        elif name.startswith("blender_slicer.host"):
+        elif name.startswith("blender_slicer.adapters.blender"):
             del sys.modules[name]

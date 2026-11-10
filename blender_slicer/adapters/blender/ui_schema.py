@@ -1,8 +1,9 @@
 """Declarative GUI schema for the Blender N-panel.
 
 The panel builder does not know what a fillet is.  It reads sections/fields
-from this file.  Method descriptors still own defaults and ranges; this file
-owns layout, labels and conditional visibility.
+from this file, rendered through ``adapters.base.ui`` — the same schema model a
+Qt or Unreal adapter would consume.  Method descriptors still own defaults and
+ranges; this file owns layout, labels and conditional visibility.
 """
 
 from __future__ import annotations
@@ -10,150 +11,337 @@ from __future__ import annotations
 import traceback
 from typing import Any
 
-
-def _visible(settings, conditions: tuple[dict[str, Any], ...]) -> bool:
-    for cond in conditions:
-        value = getattr(settings, cond["prop"], None)
-        if "equals" in cond and value != cond["equals"]:
-            return False
-        if "not_equals" in cond and value == cond["not_equals"]:
-            return False
-        if "truthy" in cond and bool(value) != bool(cond["truthy"]):
-            return False
-    return True
+from ...adapters.base.ui import Field, Section, make_field
+from .i18n import tr
 
 
-def _field(
-    prop: str, label: str | None = None, visible: dict[str, Any] | None = None
-) -> dict[str, Any]:
-    """One row of a section.
+SECTIONS: tuple[Section, ...] = (
+    Section(
+        id="source",
+        title="Source",
+        open=True,
+        fields=(
+            make_field("source_object"),
+            make_field("unit_scale_mm", "1 BU = mm"),
+        ),
+    ),
+    Section(
+        id="plan",
+        title="Slice plan",
+        open=True,
+        fields=(
+            make_field("slice_mode"),
+            make_field("axis"),
+            make_field("count"),
+            make_field(
+                "spacing_mm", "Spacing (mm)", visible={"prop": "slice_mode", "equals": "PLANAR"}
+            ),
+            make_field(
+                "offset_mm", "Offset (mm)", visible={"prop": "slice_mode", "equals": "PLANAR"}
+            ),
+            make_field(
+                "centered",
+                "Centered on object",
+                visible={"prop": "slice_mode", "equals": "PLANAR"},
+            ),
+            make_field(
+                "angle_start_deg", "Start angle", visible={"prop": "slice_mode", "equals": "RADIAL"}
+            ),
+            make_field(
+                "angle_end_deg", "End angle", visible={"prop": "slice_mode", "equals": "RADIAL"}
+            ),
+            make_field("origin_offset_mm", "Origin offset (mm)"),
+        ),
+    ),
+    Section(
+        id="shrink",
+        title="Section shrink",
+        fields=(
+            make_field("shrink_enabled"),
+            make_field(
+                "shrink_percent",
+                "Shrink (%)",
+                visible={"prop": "shrink_enabled", "truthy": True},
+            ),
+            make_field(
+                "shrink_mode",
+                "Shrink profile",
+                visible={"prop": "shrink_enabled", "truthy": True},
+            ),
+            make_field(
+                "shrink_smooth_iterations",
+                "Smooth iterations",
+                visible={"prop": "shrink_enabled", "truthy": True},
+            ),
+        ),
+    ),
+    Section(
+        id="offsets",
+        title="Cut offsets",
+        fields=(
+            make_field("inset_enabled"),
+            make_field(
+                "inset_x_mode", "X cuts", visible={"prop": "inset_enabled", "truthy": True}
+            ),
+            make_field(
+                "inset_y_mode", "Y cuts", visible={"prop": "inset_enabled", "truthy": True}
+            ),
+            make_field(
+                "inset_z_mode", "Z cuts", visible={"prop": "inset_enabled", "truthy": True}
+            ),
+            make_field(
+                "inset_auto",
+                "At least material radius",
+                visible={"prop": "inset_enabled", "truthy": True},
+            ),
+            make_field(
+                "inset_amount_mm",
+                "Offset (mm)",
+                visible={"prop": "inset_enabled", "truthy": True},
+            ),
+        ),
+    ),
+    Section(
+        id="material",
+        title="Material",
+        fields=(
+            make_field("material_thickness_mm", "Thickness (mm)"),
+            make_field("material_min_bend_radius_mm", "Min bend radius (mm)"),
+            make_field("material_max_bend_angle_deg", "Max bend angle (deg)"),
+            make_field("material_min_segment_mm", "Min segment (mm)"),
+            make_field("material_kerf_mm", "Kerf (mm)"),
+            make_field("material_k_factor", "K-factor"),
+        ),
+    ),
+    Section(
+        id="fillet",
+        title="Fillet corners",
+        fields=(
+            make_field("fillet_enabled"),
+            make_field(
+                "fillet_radius_mm", "Radius (mm)", visible={"prop": "fillet_enabled", "truthy": True}
+            ),
+            make_field(
+                "fillet_min_turn_deg",
+                "Min turn (deg)",
+                visible={"prop": "fillet_enabled", "truthy": True},
+            ),
+            make_field(
+                "fillet_arc_segments",
+                "Arc segments",
+                visible={"prop": "fillet_enabled", "truthy": True},
+            ),
+            make_field(
+                "fillet_chord_tolerance_mm",
+                "Chord tolerance (mm)",
+                visible={"prop": "fillet_enabled", "truthy": True},
+            ),
+            make_field(
+                "fillet_mode", "If it does not fit", visible={"prop": "fillet_enabled", "truthy": True}
+            ),
+            make_field(
+                "fillet_check_material",
+                "Check material radius",
+                visible={"prop": "fillet_enabled", "truthy": True},
+            ),
+        ),
+    ),
+    Section(
+        id="smooth",
+        title="Smooth",
+        fields=(
+            make_field("smooth_enabled"),
+            make_field(
+                "smooth_algorithm",
+                "Algorithm",
+                visible={"prop": "smooth_enabled", "truthy": True},
+            ),
+            make_field(
+                "smooth_iterations",
+                "Iterations",
+                visible={"prop": "smooth_enabled", "truthy": True},
+            ),
+            make_field(
+                "smooth_preserve_corners_deg",
+                "Preserve corners (deg)",
+                visible={"prop": "smooth_enabled", "truthy": True},
+            ),
+            make_field(
+                "smooth_max_deviation_mm",
+                "Max deviation (mm)",
+                visible={"prop": "smooth_enabled", "truthy": True},
+            ),
+            make_field(
+                "smooth_weight",
+                "Laplacian weight",
+                visible={"prop": "smooth_enabled", "truthy": True},
+            ),
+        ),
+    ),
+    Section(
+        id="simplify",
+        title="Simplify",
+        fields=(
+            make_field("simplify_enabled"),
+            make_field(
+                "simplify_tolerance_mm",
+                "Tolerance (mm)",
+                visible={"prop": "simplify_enabled", "truthy": True},
+            ),
+            make_field(
+                "simplify_preserve_corners_deg",
+                "Preserve corners (deg)",
+                visible={"prop": "simplify_enabled", "truthy": True},
+            ),
+        ),
+    ),
+    Section(
+        id="densify",
+        title="Densify",
+        fields=(
+            make_field("densify_enabled"),
+            make_field(
+                "densify_max_spacing_mm",
+                "Max spacing (mm)",
+                visible={"prop": "densify_enabled", "truthy": True},
+            ),
+            make_field(
+                "densify_max_angle_step_deg",
+                "Max angle step (deg)",
+                visible={"prop": "densify_enabled", "truthy": True},
+            ),
+            make_field(
+                "densify_chord_tolerance_mm",
+                "Chord tolerance (mm)",
+                visible={"prop": "densify_enabled", "truthy": True},
+            ),
+        ),
+    ),
+    Section(
+        id="resample",
+        title="Resample",
+        fields=(
+            make_field("resample_enabled"),
+            make_field(
+                "resample_spacing_mm",
+                "Spacing (mm)",
+                visible={"prop": "resample_enabled", "truthy": True},
+            ),
+            make_field(
+                "resample_adaptive",
+                "Adaptive spacing",
+                visible={"prop": "resample_enabled", "truthy": True},
+            ),
+            make_field(
+                "resample_min_spacing_mm",
+                "Minimum spacing (mm)",
+                visible={"prop": "resample_enabled", "truthy": True},
+            ),
+            make_field(
+                "resample_chord_tolerance_mm",
+                "Chord tolerance (mm)",
+                visible={"prop": "resample_enabled", "truthy": True},
+            ),
+        ),
+    ),
+    Section(
+        id="curvature",
+        title="Limit curvature",
+        fields=(
+            make_field("limit_curvature_enabled"),
+            make_field(
+                "limit_curvature_use_material",
+                "Use material minimum",
+                visible={"prop": "limit_curvature_enabled", "truthy": True},
+            ),
+            make_field(
+                "limit_curvature_min_radius_mm",
+                "Minimum radius (mm)",
+                visible={"prop": "limit_curvature_enabled", "truthy": True},
+            ),
+            make_field(
+                "limit_curvature_max_iterations",
+                "Max iterations",
+                visible={"prop": "limit_curvature_enabled", "truthy": True},
+            ),
+            make_field(
+                "limit_curvature_weight",
+                "Weight",
+                visible={"prop": "limit_curvature_enabled", "truthy": True},
+            ),
+            make_field(
+                "limit_curvature_strict",
+                "Fail if not converged",
+                visible={"prop": "limit_curvature_enabled", "truthy": True},
+            ),
+        ),
+    ),
+    Section(
+        id="contacts",
+        title="Contacts",
+        fields=(
+            make_field("contacts_enabled"),
+            make_field(
+                "contacts_gap_mm",
+                "Contact gap (mm)",
+                visible={"prop": "contacts_enabled", "truthy": True},
+            ),
+            make_field(
+                "contact_marker_mm",
+                "Contact marker",
+                visible={"prop": "contacts_enabled", "truthy": True},
+            ),
+            make_field(
+                "contacts_include_same",
+                "Same pass too",
+                visible={"prop": "contacts_enabled", "truthy": True},
+            ),
+        ),
+    ),
+    Section(
+        id="performance",
+        title="Performance",
+        fields=(
+            make_field("threads", "Worker threads"),
+            make_field("show_all_layers", "Show all layers"),
+        ),
+    ),
+    Section(
+        id="output",
+        title="Output",
+        fields=(
+            make_field("build_curves", "Build curves in scene"),
+            make_field(
+                "curve_radius_mm",
+                "Curve radius (mm)",
+                visible={"prop": "build_curves", "truthy": True},
+            ),
+            make_field("check_self_intersections", "Check self-intersections"),
+        ),
+    ),
+)
 
-    ``visible`` holds a single condition, e.g. ``{"prop": "slice_mode",
-    "equals": "PLANAR"}``; ``_visible`` reads its keys.  It must be stored
-    as-is — wrapping it into another dict made every conditional row raise and
-    aborted the whole panel draw.
-    """
-    return {"prop": prop, "label": label, "visible_if": (visible,) if visible else ()}
-
-
-SECTIONS: tuple[dict[str, Any], ...] = (
-    {
-        "id": "source",
-        "title": "Source",
-        "open": True,
-        "fields": (
-            _field("source_object"),
-            _field("unit_scale_mm", "1 BU = mm"),
-        ),
-    },
-    {
-        "id": "plan",
-        "title": "Slice plan",
-        "open": True,
-        "fields": (
-            _field("slice_mode"),
-            _field("axis"),
-            _field("count"),
-            _field("spacing_mm", "Spacing (mm)", visible={"prop": "slice_mode", "equals": "PLANAR"}),
-            _field("offset_mm", "Offset (mm)", visible={"prop": "slice_mode", "equals": "PLANAR"}),
-            _field("centered", "Centered on object", visible={"prop": "slice_mode", "equals": "PLANAR"}),
-            _field("angle_start_deg", "Start angle", visible={"prop": "slice_mode", "equals": "RADIAL"}),
-            _field("angle_end_deg", "End angle", visible={"prop": "slice_mode", "equals": "RADIAL"}),
-            _field("origin_offset_mm", "Origin offset (mm)"),
-        ),
-    },
-    {
-        "id": "material",
-        "title": "Material",
-        "fields": (
-            _field("material_thickness_mm", "Thickness (mm)"),
-            _field("material_min_bend_radius_mm", "Min bend radius (mm)"),
-            _field("material_max_bend_angle_deg", "Max bend angle (deg)"),
-            _field("material_min_segment_mm", "Min segment (mm)"),
-            _field("material_kerf_mm", "Kerf (mm)"),
-            _field("material_k_factor", "K-factor"),
-        ),
-    },
-    {
-        "id": "fillet",
-        "title": "Fillet corners",
-        "fields": (
-            _field("fillet_enabled"),
-            _field("fillet_radius_mm", "Radius (mm)", visible={"prop": "fillet_enabled", "truthy": True}),
-            _field("fillet_min_turn_deg", "Min turn (deg)", visible={"prop": "fillet_enabled", "truthy": True}),
-            _field("fillet_arc_segments", "Arc segments", visible={"prop": "fillet_enabled", "truthy": True}),
-            _field("fillet_chord_tolerance_mm", "Chord tolerance (mm)", visible={"prop": "fillet_enabled", "truthy": True}),
-            _field("fillet_mode", "If it does not fit", visible={"prop": "fillet_enabled", "truthy": True}),
-            _field("fillet_check_material", "Check material radius", visible={"prop": "fillet_enabled", "truthy": True}),
-        ),
-    },
-    {
-        "id": "smooth",
-        "title": "Smooth",
-        "fields": (
-            _field("smooth_enabled"),
-            _field("smooth_algorithm", "Algorithm", visible={"prop": "smooth_enabled", "truthy": True}),
-            _field("smooth_iterations", "Iterations", visible={"prop": "smooth_enabled", "truthy": True}),
-            _field("smooth_preserve_corners_deg", "Preserve corners (deg)", visible={"prop": "smooth_enabled", "truthy": True}),
-            _field("smooth_max_deviation_mm", "Max deviation (mm)", visible={"prop": "smooth_enabled", "truthy": True}),
-            _field("smooth_weight", "Laplacian weight", visible={"prop": "smooth_enabled", "truthy": True}),
-        ),
-    },
-    {
-        "id": "simplify",
-        "title": "Simplify",
-        "fields": (
-            _field("simplify_enabled"),
-            _field("simplify_tolerance_mm", "Tolerance (mm)", visible={"prop": "simplify_enabled", "truthy": True}),
-            _field("simplify_preserve_corners_deg", "Preserve corners (deg)", visible={"prop": "simplify_enabled", "truthy": True}),
-        ),
-    },
-    {
-        "id": "densify",
-        "title": "Densify",
-        "fields": (
-            _field("densify_enabled"),
-            _field("densify_max_spacing_mm", "Max spacing (mm)", visible={"prop": "densify_enabled", "truthy": True}),
-            _field("densify_max_angle_step_deg", "Max angle step (deg)", visible={"prop": "densify_enabled", "truthy": True}),
-            _field("densify_chord_tolerance_mm", "Chord tolerance (mm)", visible={"prop": "densify_enabled", "truthy": True}),
-        ),
-    },
-    {
-        "id": "resample",
-        "title": "Resample",
-        "fields": (
-            _field("resample_enabled"),
-            _field("resample_spacing_mm", "Spacing (mm)", visible={"prop": "resample_enabled", "truthy": True}),
-            _field("resample_adaptive", "Adaptive spacing", visible={"prop": "resample_enabled", "truthy": True}),
-            _field("resample_min_spacing_mm", "Minimum spacing (mm)", visible={"prop": "resample_enabled", "truthy": True}),
-            _field("resample_chord_tolerance_mm", "Chord tolerance (mm)", visible={"prop": "resample_enabled", "truthy": True}),
-        ),
-    },
-    {
-        "id": "curvature",
-        "title": "Limit curvature",
-        "fields": (
-            _field("limit_curvature_enabled"),
-            _field("limit_curvature_use_material", "Use material minimum", visible={"prop": "limit_curvature_enabled", "truthy": True}),
-            _field("limit_curvature_min_radius_mm", "Minimum radius (mm)", visible={"prop": "limit_curvature_enabled", "truthy": True}),
-            _field("limit_curvature_max_iterations", "Max iterations", visible={"prop": "limit_curvature_enabled", "truthy": True}),
-            _field("limit_curvature_weight", "Weight", visible={"prop": "limit_curvature_enabled", "truthy": True}),
-            _field("limit_curvature_strict", "Fail if not converged", visible={"prop": "limit_curvature_enabled", "truthy": True}),
-        ),
-    },
-    {
-        "id": "output",
-        "title": "Output",
-        "fields": (
-            _field("build_curves", "Build curves in scene"),
-            _field("curve_radius_mm", "Curve radius (mm)", visible={"prop": "build_curves", "truthy": True}),
-            _field("check_self_intersections", "Check self-intersections"),
-        ),
-    },
+GUI_SCHEMA_FIELDS: tuple[Field, ...] = tuple(
+    field for section in SECTIONS for field in section.fields
 )
 
 
-def draw_sections(layout, settings, sections=SECTIONS, boxed: bool = True) -> None:
+def _field_text(settings, item: Field) -> str:
+    """Localized label: the schema label, else the RNA property name."""
+
+    if item.label:
+        return tr(item.label)
+    try:
+        return tr(settings.bl_rna.properties[item.prop].name)
+    except (AttributeError, KeyError):
+        return item.prop
+
+
+def is_visible(settings, item: Field) -> bool:
+    return all(condition.evaluate(settings) for condition in item.visible_when)
+
+
+def draw_sections(layout, settings, sections: tuple[Section, ...] = SECTIONS, boxed: bool = True) -> None:
     """Draw fields from the schema.
 
     ``boxed`` adds the section title box, which is redundant inside a sub-panel.
@@ -161,20 +349,17 @@ def draw_sections(layout, settings, sections=SECTIONS, boxed: bool = True) -> No
     Blender would otherwise silently truncate the panel and hide everything
     below it.
     """
+
     for section in sections:
         container = layout.box() if boxed else layout
         if boxed:
-            container.label(text=section["title"])
-        for item in section["fields"]:
+            container.label(text=tr(section.title))
+        for item in section.fields:
             try:
-                if not _visible(settings, item["visible_if"]):
+                if not is_visible(settings, item):
                     continue
                 row = container.row()
-                label = item.get("label")
-                if label:
-                    row.prop(settings, item["prop"], text=label)
-                else:
-                    row.prop(settings, item["prop"])
+                row.prop(settings, item.prop, text=_field_text(settings, item))
             except Exception as exc:  # noqa: BLE001 - surface, never hide
                 traceback.print_exc()
-                container.label(text=f"{item['prop']}: {exc}", icon="ERROR")
+                container.label(text=f"{item.prop}: {exc}", icon="ERROR")

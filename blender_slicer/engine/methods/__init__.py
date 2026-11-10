@@ -5,7 +5,9 @@ from .bend import BendCheckMethod
 from .curvature import LimitCurvatureMethod
 from .densify import DensifyMethod
 from .fillet import FilletMethod
+from .offset import OffsetMethod
 from .resample import ResampleMethod
+from .shrink import ShrinkMethod
 from .simplify import SimplifyMethod
 from .smooth import SmoothMethod
 
@@ -17,7 +19,9 @@ __all__ = [
     "LimitCurvatureMethod",
     "DensifyMethod",
     "FilletMethod",
+    "OffsetMethod",
     "ResampleMethod",
+    "ShrinkMethod",
     "SimplifyMethod",
     "SmoothMethod",
 ]

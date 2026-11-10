@@ -10,7 +10,9 @@ from .methods import (
     FilletMethod,
     LimitCurvatureMethod,
     Method,
+    OffsetMethod,
     ResampleMethod,
+    ShrinkMethod,
     SimplifyMethod,
     SmoothMethod,
 )
@@ -63,11 +65,13 @@ class MethodRegistry:
     def builtins(cls) -> "MethodRegistry":
         registry = cls()
         for method in (
+            OffsetMethod(),
             FilletMethod(),
             SmoothMethod(),
             SimplifyMethod(),
             DensifyMethod(),
             ResampleMethod(),
+            ShrinkMethod(),
             LimitCurvatureMethod(),
             BendCheckMethod(),
         ):

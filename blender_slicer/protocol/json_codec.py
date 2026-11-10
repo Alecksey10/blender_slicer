@@ -10,28 +10,22 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from .types import (
-    Contour,
+from .diagnostics import Diagnostic, ErrorCode, Severity
+from .material import MaterialProfile
+from .operations import FailurePolicy, Limits, OperationSpec, RequestOptions, TargetSelector
+from .request import ProcessingRequest
+from .result import (
+    ContourMetrics,
     ContourResult,
-    ContourRole,
-    Diagnostic,
     EngineInfo,
-    ErrorCode,
-    FailurePolicy,
-    FoldSpec,
-    Limits,
-    MaterialProfile,
-    OperationSpec,
-    ProcessingRequest,
     ProcessingResult,
-    RequestOptions,
     ResultMetrics,
     ResultStatus,
-    Severity,
-    Slice,
+    SliceMetrics,
     SliceResult,
-    TargetSelector,
 )
+from .shapes import Contour, ContourRole, FoldSpec, Slice
+from .version import PROTOCOL_VERSION, SCHEMA_VERSION
 
 
 def _fold_to_dict(fold: FoldSpec | None) -> dict | None:
@@ -81,6 +75,7 @@ def _slice_to_dict(s: Slice) -> dict:
         "id": s.id,
         "index": s.index,
         "frame_id": s.frame_id,
+        "offset_mm": s.offset_mm,
         "metadata": dict(s.metadata),
         "contours": [_contour_to_dict(c) for c in s.contours],
     }
@@ -91,6 +86,7 @@ def _slice_from_dict(data: dict) -> Slice:
         id=str(data["id"]),
         index=int(data.get("index", 0)),
         frame_id=data.get("frame_id"),
+        offset_mm=float(data.get("offset_mm", 0.0) or 0.0),
         metadata=dict(data.get("metadata") or {}),
         contours=[_contour_from_dict(c) for c in data.get("contours", [])],
     )
@@ -192,8 +188,8 @@ def request_from_dict(data: dict) -> ProcessingRequest:
     opts = data.get("options") or {}
     lim = data.get("limits") or {}
     return ProcessingRequest(
-        schema_version=str(data.get("schema_version", "1.0")),
-        protocol_version=str(data.get("protocol_version", "1.0")),
+        schema_version=str(data.get("schema_version", SCHEMA_VERSION)),
+        protocol_version=str(data.get("protocol_version", PROTOCOL_VERSION)),
         request_id=str(data.get("request_id", "")),
         units=str(data.get("units", "mm")),
         material=_material_from_dict(data.get("material") or {}),
@@ -319,3 +315,104 @@ def result_to_dict(result: ProcessingResult) -> dict:
 
 def dumps_result(result: ProcessingResult, *, indent: int | None = 2) -> str:
     return json.dumps(result_to_dict(result), indent=indent, ensure_ascii=False)
+
+
+def _diagnostic_from_dict(data: dict) -> Diagnostic:
+    return Diagnostic(
+        severity=Severity(data.get("severity", "info")),
+        code=ErrorCode(data.get("code", "E_INTERNAL")),
+        message=str(data.get("message", "")),
+        stage=data.get("stage"),
+        slice_id=data.get("slice_id"),
+        contour_id=data.get("contour_id"),
+        point_index=int(data["point_index"]) if data.get("point_index") is not None else None,
+        details=dict(data.get("details") or {}),
+    )
+
+
+def _contour_metrics_from_dict(data: dict | None) -> ContourMetrics:
+    d = data or {}
+    return ContourMetrics(
+        input_points=int(d.get("input_points", 0)),
+        output_points=int(d.get("output_points", 0)),
+        min_radius_mm=float(d["min_radius_mm"]) if d.get("min_radius_mm") is not None else None,
+        max_turn_deg=float(d["max_turn_deg"]) if d.get("max_turn_deg") is not None else None,
+        max_source_deviation_mm=(
+            float(d["max_source_deviation_mm"])
+            if d.get("max_source_deviation_mm") is not None
+            else None
+        ),
+        length_mm=float(d.get("length_mm", 0.0)),
+        self_intersections=int(d.get("self_intersections", 0)),
+    )
+
+
+def _slice_metrics_from_dict(data: dict | None) -> SliceMetrics:
+    d = data or {}
+    return SliceMetrics(
+        input_points=int(d.get("input_points", 0)),
+        output_points=int(d.get("output_points", 0)),
+        input_contours=int(d.get("input_contours", 0)),
+        output_contours=int(d.get("output_contours", 0)),
+        stage_durations_ms=dict(d.get("stage_durations_ms") or {}),
+    )
+
+
+def _contour_result_from_dict(data: dict) -> ContourResult:
+    return ContourResult(
+        id=str(data["id"]),
+        source_id=data.get("source_id"),
+        role=ContourRole(data.get("role", "cut")),
+        closed=bool(data.get("closed", False)),
+        points=[(float(p[0]), float(p[1])) for p in data.get("points", [])],
+        parent_id=data.get("parent_id"),
+        tags=list(data.get("tags") or []),
+        fold=_fold_from_dict(data.get("fold")),
+        changed=bool(data.get("changed", False)),
+        segment_tags=list(data["segment_tags"]) if data.get("segment_tags") else None,
+        metrics=_contour_metrics_from_dict(data.get("metrics")),
+    )
+
+
+def result_from_dict(data: dict) -> ProcessingResult:
+    """Parse a result produced by :func:`dumps_result` (round-trip safe)."""
+
+    engine = data.get("engine") or {}
+    metrics = data.get("metrics") or {}
+    return ProcessingResult(
+        schema_version=str(data.get("schema_version", SCHEMA_VERSION)),
+        protocol_version=str(data.get("protocol_version", PROTOCOL_VERSION)),
+        request_id=str(data.get("request_id", "")),
+        status=ResultStatus(data.get("status", "error")),
+        engine=EngineInfo(
+            name=str(engine.get("name", "slicer-engine")),
+            version=str(engine.get("version", "0.0.0")),
+            protocol_version=str(engine.get("protocol_version", PROTOCOL_VERSION)),
+        ),
+        units=str(data.get("units", "mm")),
+        slices=[
+            SliceResult(
+                slice_id=str(s.get("slice_id", "")),
+                index=int(s.get("index", 0)),
+                frame_id=s.get("frame_id"),
+                changed=bool(s.get("changed", False)),
+                contours=[_contour_result_from_dict(c) for c in s.get("contours", [])],
+                metrics=_slice_metrics_from_dict(s.get("metrics")),
+                diagnostics=[_diagnostic_from_dict(d) for d in s.get("diagnostics", [])],
+            )
+            for s in data.get("slices", [])
+        ],
+        diagnostics=[_diagnostic_from_dict(d) for d in data.get("diagnostics", [])],
+        metrics=ResultMetrics(
+            slices_in=int(metrics.get("slices_in", 0)),
+            slices_ok=int(metrics.get("slices_ok", 0)),
+            slices_failed=int(metrics.get("slices_failed", 0)),
+            points_in=int(metrics.get("points_in", 0)),
+            points_out=int(metrics.get("points_out", 0)),
+        ),
+        metadata=dict(data.get("metadata") or {}),
+    )
+
+
+def loads_result(payload: str | bytes) -> ProcessingResult:
+    return result_from_dict(json.loads(payload))

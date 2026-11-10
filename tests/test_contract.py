@@ -7,7 +7,7 @@ import math
 import unittest
 from pathlib import Path
 
-from blender_slicer.core import (
+from blender_slicer.engine import (
     Contour,
     ContourRole,
     Engine,

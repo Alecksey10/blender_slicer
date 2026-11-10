@@ -1,5 +1,28 @@
+"""Blender adapter: settings -> plan/request -> controller -> events.
+
+The adapter is intentionally thin.  It maps addon settings to host-independent
+objects (``SlicePlan``, ``ProcessingRequest``), delegates to
+:class:`blender_slicer.app.controller.AppController` and publishes UI events.
+All geometry stays in the engine, all 3D in the host.
+"""
+
 from __future__ import annotations
 
+from ...adapters.base.engine_client import EngineClient
+from ...adapters.base.events import (
+    BUS,
+    TOPIC_PROCESS_COMPLETED,
+    TOPIC_PROCESS_FAILED,
+    TOPIC_PROCESS_STARTED,
+    TOPIC_RESULT_CLEARED,
+    TOPIC_SLICES_GENERATED,
+    TOPIC_SETTINGS_CHANGED,
+    TOPIC_UI_REDRAW,
+)
+from ...adapters.base.layers import SliceLayer
+from ...adapters.base.plan import SlicePlan
+from ...adapters.base.runtime import RUNTIME
+from ...adapters.base.controller import AppController, ProcessSummary, format_diagnostic
 from ...engine.facade import Engine
 from ...protocol.errors import ConfigError
 from ...protocol.types import (
@@ -12,23 +35,14 @@ from ...protocol.types import (
     ProcessingResult,
     RequestOptions,
     ResultStatus,
-    Severity,
     TargetSelector,
 )
+from ...spatial.contacts import ContactPoint
 from . import slicing, visualization
-from blender_slicer.adapters.base.events import (
-    BUS,
-    TOPIC_PROCESS_COMPLETED,
-    TOPIC_PROCESS_FAILED,
-    TOPIC_PROCESS_STARTED,
-    TOPIC_RESULT_CLEARED,
-    TOPIC_SLICES_GENERATED,
-    TOPIC_SETTINGS_CHANGED,
-    TOPIC_UI_REDRAW,
-)
-from blender_slicer.adapters.base.runtime import RUNTIME
+from .host import BlenderHost
 
-
+# Shared, stateless engine.  Its registry is read-only, so parallel calls are
+# safe (see engine/parallel.py).
 ENGINE = Engine()
 
 
@@ -58,6 +72,14 @@ def validate_settings(settings) -> None:
         errors.append("Minimum bend radius must be positive")
     if not (0.0 <= settings.material_k_factor <= 1.0):
         errors.append("K-factor must be in [0, 1]")
+    if settings.material_kerf_mm < 0:
+        errors.append("Kerf cannot be negative")
+    if getattr(settings, "inset_enabled", False) and getattr(settings, "inset_amount_mm", 0.0) < 0:
+        errors.append("Cut offset cannot be negative")
+    if getattr(settings, "threads", 0) < 0:
+        errors.append("Worker threads cannot be negative")
+    if getattr(settings, "contacts_gap_mm", 0.0) < 0:
+        errors.append("Contact gap cannot be negative")
     if settings.fillet_enabled:
         if settings.fillet_radius_mm < 0:
             errors.append("Fillet radius cannot be negative")
@@ -90,6 +112,34 @@ def material_from_settings(settings) -> MaterialProfile:
 
 def operations_from_settings(settings) -> list[OperationSpec]:
     operations: list[OperationSpec] = []
+    if bool(getattr(settings, "shrink_enabled", False)):
+        # The per-slice ratio is attached by the controller; the engine applies
+        # it and smooths the result before offsets and fillets.
+        operations.append(
+            OperationSpec(
+                method="shrink_section",
+                params={
+                    "use_slice_ratio": True,
+                    "ratio": 1.0,
+                    "anchor": "centroid",
+                    "smooth_iterations": int(
+                        getattr(settings, "shrink_smooth_iterations", 2)
+                    ),
+                    "preserve_corners_deg": 70.0,
+                },
+                target=TargetSelector(roles=(ContourRole.CUT,)),
+            )
+        )
+    if bool(getattr(settings, "inset_enabled", False)):
+        # The signed distance lives on each slice (Slice.offset_mm); the engine
+        # only applies it, so the host owns the axis policy.
+        operations.append(
+            OperationSpec(
+                method="offset_contour",
+                params={"use_slice_offset": True, "distance_mm": 0.0},
+                target=TargetSelector(roles=(ContourRole.CUT,)),
+            )
+        )
     if settings.fillet_enabled:
         operations.append(
             OperationSpec(
@@ -166,15 +216,15 @@ def operations_from_settings(settings) -> list[OperationSpec]:
     return operations
 
 
-def build_request(settings) -> ProcessingRequest:
+def build_request(settings, slices=None) -> ProcessingRequest:
+    plan = SlicePlan.from_settings(settings)
+    slice_list = list(RUNTIME.slices if slices is None else slices)
     return ProcessingRequest(
-        schema_version="1.0",
-        protocol_version="1.0",
         request_id=f"blender-{settings.revision}-{settings.count}",
         units="mm",
         material=material_from_settings(settings),
         operations=operations_from_settings(settings),
-        slices=list(RUNTIME.slices),
+        slices=slice_list,
         targets=TargetSelector(roles=(ContourRole.CUT,)),
         failure_policy=FailurePolicy.PER_SLICE,
         options=RequestOptions(
@@ -187,67 +237,111 @@ def build_request(settings) -> ProcessingRequest:
             "host": "blender",
             "source": getattr(settings.source_object, "name", ""),
             "check_self_intersections": bool(settings.check_self_intersections),
+            "cut_offset_mm": plan.cut_offset_for(plan.axis),
+            "threads": int(getattr(settings, "threads", 0) or 0),
         },
     )
 
 
+def _controller(context, settings) -> AppController:
+    threads = int(getattr(settings, "threads", 0) or 0)
+    client = EngineClient(engine=ENGINE, workers=None if threads <= 0 else threads)
+    return AppController(BlenderHost(context, settings), RUNTIME.layers, client)
+
+
 def generate(context, settings) -> int:
     validate_settings(settings)
-    slices, frames = slicing.generate_slices(context, settings)
-    RUNTIME.slices = slices
-    RUNTIME.frames = frames
-    RUNTIME.result = None
-    RUNTIME.revision = int(settings.revision)
-    RUNTIME.source_name = getattr(settings.source_object, "name", "")
-    RUNTIME.dirty = False
+    plan = SlicePlan.from_settings(settings)
+    layer = _controller(context, settings).generate(plan, revision=int(settings.revision))
 
     settings.dirty = False
-    settings.last_slices = len(slices)
-    settings.last_points = sum(len(c.points) for s in slices for c in s.contours)
+    settings.last_slices = len(layer.slices)
+    settings.last_points = layer.point_count
     settings.last_errors = 0
     settings.last_warnings = 0
-    settings.status = f"Generated {len(slices)} slices"
-    settings.status_detail = f"{settings.last_points} points, {len(frames)} frames"
-    settings.diagnostics_text = ""
-
-    if settings.build_curves:
-        visualization.build_from_slices(context, RUNTIME.slices, RUNTIME.frames, settings)
-    BUS.publish(
-        TOPIC_SLICES_GENERATED,
-        slices=RUNTIME.slices,
-        frames=RUNTIME.frames,
-        settings=settings,
-        context=context,
+    settings.last_contacts = 0
+    settings.status = f"Generated {len(layer.slices)} slices"
+    settings.status_detail = (
+        f"{settings.last_points} points, {len(layer.frames)} frames · {layer.name}"
     )
+    settings.diagnostics_text = ""
+    RUNTIME.dirty = False
     BUS.publish(TOPIC_UI_REDRAW, context=context)
-    return len(slices)
+    return len(layer.slices)
 
 
 def process_current(context, settings) -> ProcessingResult:
     validate_settings(settings)
-    if not RUNTIME.slices:
+    plan = SlicePlan.from_settings(settings)
+    layer = _layer_for_plan(plan)
+    if layer is None or not layer.slices:
         raise ConfigError("Generate slices first")
-    if RUNTIME.revision != int(settings.revision):
+    if layer.revision != int(settings.revision):
         raise ConfigError("Slices are outdated - generate them again")
 
     BUS.publish(TOPIC_PROCESS_STARTED, settings=settings, context=context)
-    request = build_request(settings)
-    result = ENGINE.process(request)
-    RUNTIME.result = result
-    _update_status(settings, result)
-    if settings.build_curves:
-        visualization.build_from_result(context, result, RUNTIME.frames, settings)
-    if result.status == ResultStatus.ERROR:
-        BUS.publish(TOPIC_PROCESS_FAILED, result=result, settings=settings, context=context)
+    summary = _controller(context, settings).process(build_request(settings, layer.slices), layer)
+    _update_status(settings, summary)
+
+    if getattr(settings, "contacts_enabled", False):
+        contacts = _controller(context, settings).find_contacts(
+            gap_mm=float(getattr(settings, "contacts_gap_mm", 1.0)),
+            include_same_layer=bool(getattr(settings, "contacts_include_same", False)),
+        )
+        settings.last_contacts = len(contacts)
+        settings.status_detail += f", contacts {len(contacts)}"
+
+    if summary.result.status == ResultStatus.ERROR:
+        BUS.publish(TOPIC_PROCESS_FAILED, result=summary.result, settings=settings, context=context)
     else:
-        BUS.publish(TOPIC_PROCESS_COMPLETED, result=result, settings=settings, context=context)
+        BUS.publish(
+            TOPIC_PROCESS_COMPLETED, result=summary.result, settings=settings, context=context
+        )
     BUS.publish(TOPIC_UI_REDRAW, context=context)
-    return result
+    return summary.result
+
+
+def _layer_for_plan(plan: SlicePlan) -> SliceLayer | None:
+    layer = RUNTIME.layers.get(plan.layer_id())
+    if layer is not None:
+        return layer
+    active = RUNTIME.layers.active
+    if active is not None and active.source_name == plan.model:
+        return active
+    return active
 
 
 def run(context, settings) -> ProcessingResult:
     generate(context, settings)
     return process_current(context, settings)
+
+
+def find_contacts(context, settings) -> list[ContactPoint]:
+    validate_settings(settings)
+    controller = _controller(context, settings)
+    contacts = controller.find_contacts(
+        gap_mm=float(getattr(settings, "contacts_gap_mm", 1.0)),
+        include_same_layer=bool(getattr(settings, "contacts_include_same", False)),
+    )
+    settings.last_contacts = len(contacts)
+    settings.status_detail = (
+        f"{len(contacts)} contact(s) within {float(getattr(settings, 'contacts_gap_mm', 1.0)):.3f} mm"
+    )
+    BUS.publish(TOPIC_UI_REDRAW, context=context)
+    return contacts
+
+
+def set_layer_visible(context, settings, layer_id: str) -> bool:
+    controller = _controller(context, settings)
+    visible = controller.set_layer_visible(layer_id)
+    BUS.publish(TOPIC_UI_REDRAW, context=context)
+    return visible
+
+
+def remove_layer(context, settings, layer_id: str) -> bool:
+    removed = _controller(context, settings).remove_layer(layer_id)
+    BUS.publish(TOPIC_UI_REDRAW, context=context)
+    return removed
 
 
 def clear(context, settings) -> None:
@@ -260,6 +354,7 @@ def clear(context, settings) -> None:
     settings.last_points = 0
     settings.last_errors = 0
     settings.last_warnings = 0
+    settings.last_contacts = 0
     settings.dirty = True
     BUS.publish(TOPIC_RESULT_CLEARED, settings=settings, context=context)
     BUS.publish(TOPIC_UI_REDRAW, context=context)
@@ -272,47 +367,18 @@ def on_settings_changed(settings=None, context=None, **kwargs) -> None:
         settings.status_detail = "The current result is stale"
 
 
-def _update_status(settings, result: ProcessingResult) -> None:
-    lines: list[str] = []
-    errors = 0
-    warnings = 0
-    for d in result.diagnostics:
-        lines.append(_format_diag(d))
-        if d.severity == Severity.ERROR:
-            errors += 1
-        elif d.severity == Severity.WARNING:
-            warnings += 1
-    for slice_result in result.slices:
-        for d in slice_result.diagnostics:
-            lines.append(_format_diag(d))
-            if d.severity == Severity.ERROR:
-                errors += 1
-            elif d.severity == Severity.WARNING:
-                warnings += 1
-    settings.last_slices = len(result.slices)
-    settings.last_points = result.metrics.points_out
-    settings.last_errors = errors
-    settings.last_warnings = warnings
-    settings.diagnostics_text = "\n".join(lines)
-    settings.status = f"{result.status.value.upper()} - {result.metrics.slices_ok}/{result.metrics.slices_in} slices"
-    settings.status_detail = (
-        f"points {result.metrics.points_in} -> {result.metrics.points_out}, "
-        f"errors {errors}, warnings {warnings}"
-    )
+def _update_status(settings, summary: ProcessSummary) -> None:
+    settings.last_slices = len(summary.result.slices)
+    settings.last_points = summary.result.metrics.points_out
+    settings.last_errors = summary.errors
+    settings.last_warnings = summary.warnings
+    settings.diagnostics_text = "\n".join(summary.lines)
+    settings.status = summary.status_text
+    settings.status_detail = summary.detail_text
 
 
-def _format_diag(d) -> str:
-    where = []
-    if d.slice_id:
-        where.append(d.slice_id)
-    if d.contour_id:
-        where.append(d.contour_id)
-    prefix = f"[{d.severity.value.upper()}] {d.code.value}"
-    if where:
-        prefix += " " + "/".join(where)
-    if d.stage:
-        prefix += f" ({d.stage})"
-    return f"{prefix}: {d.message}"
+def _format_diag(item) -> str:
+    return format_diagnostic(item)
 
 
 def _on_redraw(context=None, **_kwargs) -> None:

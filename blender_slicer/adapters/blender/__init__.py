@@ -16,8 +16,9 @@ def register() -> None:
             f"found {' '.join(str(v) for v in bpy.app.version[:2])}"
         )
 
-    from . import adapter, operators, panels, properties
+    from . import adapter, i18n, operators, panels, properties
 
+    i18n.register()
     properties.register()
     operators.register()
     panels.register()
@@ -30,12 +31,13 @@ def unregister() -> None:
     if not _REGISTERED:
         return
 
-    from . import adapter, operators, panels, properties
+    from . import adapter, i18n, operators, panels, properties
     from blender_slicer.adapters.base.runtime import RUNTIME
 
     adapter.unsubscribe_events()
     panels.unregister()
     operators.unregister()
     properties.unregister()
+    i18n.unregister()
     RUNTIME.clear()
     _REGISTERED = False

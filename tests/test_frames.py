@@ -6,14 +6,8 @@ import math
 import random
 import unittest
 
-from blender_slicer.core.frames import (
-    make_frame,
-    v3_cross,
-    v3_dot,
-    v3_length,
-    v3_mul,
-    v3_sub,
-)
+from blender_slicer.spatial.frames import make_frame
+from blender_slicer.spatial.vectors import v3_cross, v3_dot, v3_length, v3_mul, v3_sub
 
 
 class FrameTests(unittest.TestCase):

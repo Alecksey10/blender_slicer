@@ -79,10 +79,10 @@ def run_checks(bpy, addon, settings_io, ui_schema, operators, panels, RUNTIME) -
     check("every exported setting became an RNA property", not missing, ", ".join(missing))
 
     missing_ui = [
-        item["prop"]
+        item.prop
         for section in ui_schema.SECTIONS
-        for item in section["fields"]
-        if item["prop"] not in rna
+        for item in section.fields
+        if item.prop not in rna
     ]
     check("every GUI field became an RNA property", not missing_ui, ", ".join(missing_ui))
 
@@ -201,9 +201,10 @@ def main() -> int:
 
     addon = importlib.import_module("blender_slicer")
     modules = {
-        name: importlib.import_module(f"blender_slicer.host.{name}")
-        for name in ("operators", "panels", "runtime", "settings_io", "ui_schema")
+        name: importlib.import_module(f"blender_slicer.adapters.blender.{name}")
+        for name in ("operators", "panels", "settings_io", "ui_schema")
     }
+    runtime_module = importlib.import_module("blender_slicer.adapters.base.runtime")
 
     if args.zip:
         check(
@@ -220,7 +221,7 @@ def main() -> int:
             modules["ui_schema"],
             modules["operators"],
             modules["panels"],
-            modules["runtime"].RUNTIME,
+            runtime_module.RUNTIME,
         )
     finally:
         scene = getattr(bpy.context, "scene", None)

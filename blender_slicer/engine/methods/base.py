@@ -19,6 +19,8 @@ class MethodContext:
     diagnostics: list[Diagnostic] = field(default_factory=list)
     slice_id: str | None = None
     contour_id: str | None = None
+    slice_offset_mm: float = 0.0
+    slice_metadata: dict = field(default_factory=dict)
 
     def warn(
         self,

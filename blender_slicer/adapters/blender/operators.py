@@ -3,6 +3,8 @@ import traceback
 import bpy
 from bpy_extras.io_utils import ExportHelper, ImportHelper
 
+from ...adapters.base.export import ExportManager
+from ...adapters.base.runtime import RUNTIME
 from ...protocol.errors import ConfigError, SlicerError
 from ...protocol.types import ResultStatus
 from . import adapter, settings_io
@@ -148,6 +150,107 @@ class SLICER_OT_import_settings(bpy.types.Operator, ImportHelper):
         return {"FINISHED"}
 
 
+class SLICER_OT_find_contacts(bpy.types.Operator):
+    bl_idname = "slicer.find_contacts"
+    bl_label = "Find Contacts"
+    bl_description = "Mark points where slices of different passes meet"
+    bl_options = {"REGISTER", "UNDO"}
+
+    def execute(self, context):
+        try:
+            contacts = adapter.find_contacts(context, _settings(context))
+        except (SlicerError, ValueError) as exc:
+            return _fail(self, exc)
+        self.report({"INFO"}, f"{len(contacts)} contact point(s)")
+        return {"FINISHED"}
+
+
+class SLICER_OT_frame_contacts(bpy.types.Operator):
+    bl_idname = "slicer.frame_contacts"
+    bl_label = "Frame Contacts"
+    bl_description = "Select the contact markers and frame them in the viewport"
+    bl_options = {"REGISTER"}
+
+    def execute(self, context):
+        root = bpy.data.collections.get("Slice Engine")
+        collection = root.children.get("Contacts") if root is not None else None
+        objects = [
+            obj for obj in getattr(collection, "objects", ()) if obj.type == "MESH"
+        ]
+        if not objects:
+            self.report({"WARNING"}, "No contact markers; run Find Contacts first")
+            return {"CANCELLED"}
+        for obj in context.view_layer.objects:
+            obj.select_set(False)
+        for obj in objects:
+            obj.select_set(True)
+        context.view_layer.objects.active = objects[0]
+        area = next(
+            (area for area in getattr(context.screen, "areas", ()) if area.type == "VIEW_3D"),
+            None,
+        )
+        if area is None:
+            return {"FINISHED"}
+        region = next((r for r in area.regions if r.type == "WINDOW"), None)
+        with context.temp_override(area=area, region=region):
+            bpy.ops.view3d.view_selected()
+        return {"FINISHED"}
+
+
+class SLICER_OT_toggle_layer(bpy.types.Operator):
+    bl_idname = "slicer.toggle_layer"
+    bl_label = "Toggle Layer"
+    bl_description = "Show or hide this cutting pass in the viewport"
+    bl_options = {"REGISTER", "UNDO"}
+
+    layer_id: bpy.props.StringProperty()
+
+    def execute(self, context):
+        try:
+            visible = adapter.set_layer_visible(context, _settings(context), self.layer_id)
+        except (SlicerError, ValueError) as exc:
+            return _fail(self, exc)
+        self.report({"INFO"}, "Visible" if visible else "Hidden")
+        return {"FINISHED"}
+
+
+class SLICER_OT_clear_layers(bpy.types.Operator):
+    bl_idname = "slicer.clear_layers"
+    bl_label = "Clear All Layers"
+    bl_description = "Remove every cutting pass and its curves"
+    bl_options = {"REGISTER", "UNDO"}
+
+    def execute(self, context):
+        try:
+            adapter.clear(context, _settings(context))
+        except (SlicerError, ValueError) as exc:
+            return _fail(self, exc)
+        self.report({"INFO"}, "All layers cleared")
+        return {"FINISHED"}
+
+
+class SLICER_OT_export_slices(bpy.types.Operator, ExportHelper):
+    bl_idname = "slicer.export_slices"
+    bl_label = "Export Slices"
+    bl_description = "Write every visible layer as JSON or SVG"
+    filename_ext = ".json"
+    filter_glob: bpy.props.StringProperty(default="*.json;*.svg", options={"HIDDEN"})
+
+    def execute(self, context):
+        try:
+            layers = RUNTIME.layers.visible_layers()
+            ExportManager().export(
+                self.filepath,
+                layers,
+                RUNTIME.result,
+                (),
+            )
+        except (OSError, ValueError) as exc:
+            return _fail(self, exc)
+        self.report({"INFO"}, f"Exported {len(layers)} layer(s) to {self.filepath}")
+        return {"FINISHED"}
+
+
 CLASSES = (
     SLICER_OT_generate,
     SLICER_OT_process,
@@ -156,6 +259,11 @@ CLASSES = (
     SLICER_OT_show_report,
     SLICER_OT_export_settings,
     SLICER_OT_import_settings,
+    SLICER_OT_find_contacts,
+    SLICER_OT_frame_contacts,
+    SLICER_OT_toggle_layer,
+    SLICER_OT_clear_layers,
+    SLICER_OT_export_slices,
 )
 
 

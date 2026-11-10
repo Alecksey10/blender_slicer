@@ -570,6 +570,45 @@ def laplacian(
 # fillet
 # ---------------------------------------------------------------------------
 
+def collapse_collinear(
+    points: list[Point2], closed: bool, tol_deg: float = 1e-6
+) -> list[Point2]:
+    """Drop interior vertices that do not change the polyline direction.
+
+    Cross-sections of a triangle mesh contain points where a plane crosses a
+    triangle diagonal or a coplanar split.  Those points are pure subdivision
+    noise: keeping them makes the free room of a corner, and therefore the
+    clamped fillet radius, depend on *where* the plane hits the triangulation
+    instead of on the shape of the model.  Collapsing them makes identical
+    cross-sections produce identical results.
+    """
+
+    n = len(points)
+    if n < 3:
+        return list(points)
+    tolerance = math.radians(max(0.0, tol_deg))
+    if closed:
+        keep = [
+            i
+            for i in range(n)
+            if turn_angle(points[(i - 1) % n], points[i], points[(i + 1) % n]) > tolerance
+        ]
+        if len(keep) < 3:
+            return list(points)
+        return [points[i] for i in keep]
+
+    keep_open = [0]
+    keep_open.extend(
+        i for i in range(1, n - 1) if turn_angle(points[i - 1], points[i], points[i + 1]) > tolerance
+    )
+    keep_open.append(n - 1)
+    if len(keep_open) < 3:
+        # A straight polyline has no corners to protect; keep its points explicit
+        # so the function only removes redundant points *inside* a shape.
+        return list(points)
+    return [points[i] for i in keep_open]
+
+
 def fillet_corners(
     points: list[Point2],
     closed: bool,
@@ -584,6 +623,9 @@ def fillet_corners(
 
     Returns (points, warnings).  ``mode`` is clamp|error|skip.
     """
+    # Mesh triangulation adds collinear points on straight edges; they must not
+    # consume the corner room, otherwise identical slices get different radii.
+    points = collapse_collinear(dedupe(points, closed), closed)
     n = len(points)
     if n < 3 or radius_mm <= 0:
         return list(points), []

@@ -45,6 +45,10 @@ FLOAT_FIELDS = (
     "limit_curvature_min_radius_mm",
     "limit_curvature_weight",
     "curve_radius_mm",
+    "inset_amount_mm",
+    "shrink_percent",
+    "contacts_gap_mm",
+    "contact_marker_mm",
 )
 
 INT_FIELDS = (
@@ -52,6 +56,8 @@ INT_FIELDS = (
     "fillet_arc_segments",
     "smooth_iterations",
     "limit_curvature_max_iterations",
+    "shrink_smooth_iterations",
+    "threads",
 )
 
 BOOL_FIELDS = (
@@ -68,6 +74,12 @@ BOOL_FIELDS = (
     "limit_curvature_strict",
     "build_curves",
     "check_self_intersections",
+    "inset_enabled",
+    "inset_auto",
+    "shrink_enabled",
+    "contacts_enabled",
+    "contacts_include_same",
+    "show_all_layers",
 )
 
 ENUM_FIELDS = (
@@ -75,6 +87,10 @@ ENUM_FIELDS = (
     "axis",
     "fillet_mode",
     "smooth_algorithm",
+    "inset_x_mode",
+    "inset_y_mode",
+    "inset_z_mode",
+    "shrink_mode",
 )
 
 VECTOR_FIELDS = ("origin_offset_mm",)

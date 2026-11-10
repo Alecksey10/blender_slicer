@@ -48,11 +48,12 @@
 
 | Пакет | Может импортировать | Не может импортировать |
 | --- | --- | --- |
-| `slicer_protocol` | только стандартную библиотеку | engine, adapters, preview |
-| `slicer_engine` | protocol + stdlib | adapters, preview, хост |
-| `slicer_preview` | protocol + stdlib | engine methods, adapters, хост |
-| `slicer_adapters` | protocol, фасад engine, preview, host SDK | внутренности методов engine |
-| `slicer_app` | всё перечисленное | — (composition root) |
+| `blender_slicer.protocol` | только стандартную библиотеку | engine, spatial, adapters, preview |
+| `blender_slicer.spatial` | protocol + stdlib | engine, adapters, preview, хост |
+| `blender_slicer.engine` | protocol + spatial + stdlib | adapters, preview, хост |
+| `blender_slicer.preview` | protocol + stdlib | engine methods, adapters, хост |
+| `blender_slicer.adapters` | protocol, spatial, фасад engine, preview, host SDK | внутренности методов engine |
+| `blender_slicer.app` | всё перечисленное | — (composition root) |
 
 Правило проверяется тестом: AST-скрипт обходит `import`-ы и падает при нарушении.
 Это дешевле, чем потом распутывать циклические зависимости.
@@ -60,74 +61,85 @@
 ## 1.3. Пакеты и модули
 
 ```text
-slicer_protocol/
-  __init__.py
-  version.py          # PROTOCOL_VERSION, SCHEMA_VERSION
-  units.py            # mm/deg, проверка конечных чисел
-  types.py            # Point2, Vec3, Range, Limits
-  geometry.py         # Contour, Slice, FoldSpec, ContourRole
-  material.py         # MaterialProfile
-  operations.py       # OperationSpec, TargetSelector, FailurePolicy
-  request.py          # ProcessingRequest, RequestOptions
-  result.py           # ProcessingResult, SliceResult, ContourResult, Metrics
-  diagnostics.py      # Diagnostic, Severity, ErrorCode
-  descriptor.py       # ParamSpec, MethodDescriptor, EngineDescriptor
-  json_codec.py       # dataclasses ↔ JSON, канонический JSON
-  schema.py           # структурная валидация без pydantic
-  migrate.py          # миграции schema_version
-
-slicer_engine/
-  __init__.py         # публичный фасад
-  facade.py           # Engine: descriptor / validate / process / process_json
-  registry.py         # MethodRegistry, регистрация встроенных методов
-  pipeline/
-    runner.py         # normalize → operations → validate
-    selection.py      # TargetSelector → конкретные контуры
-    policies.py       # strict / per_slice / best_effort
-    state.py          # изменяемое состояние одного среза внутри вызова
-  methods/
-    base.py           # Method Protocol, MethodContext, StageOutput
-    normalize.py
-    resample.py
-    simplify.py
-    smooth.py
-    fillet.py
-    densify.py
-    curvature.py
-    local.py
-    bend_check.py
-    repair.py
-  validation/
-    invariants.py     # геометрические инварианты
-    limits.py         # лимиты точек/срезов/операций
-  cli.py              # python -m slicer_engine describe|validate|process
-
-slicer_preview/
-  __init__.py
-  svg.py              # рендер одного/нескольких срезов
-  html.py             # контактный лист
-  layout.py           # сетка, масштаб, подписи
-  palette.py          # цвета ролей/диагностики
-  cli.py              # python -m slicer_preview request.json result.json
-
-slicer_adapters/
-  base/
-    host.py           # HostAdapter Protocol
-    frames.py         # CoordinateFrame, FrameMapper, FrameStore
-    runtime.py        # ProjectState, Cache, UndoStack
-    events.py         # EventBus, темы событий
-    engine_client.py  # in-process или RPC-клиент
-    ui.py             # Widget/Builder/GuiConfig Protocol
-    export.py         # ExportManager
-  preview_adapter/    # локальный адаптер для разработки без Blender
-  blender/            # bpy-реализация
-  qt/                 # заготовка
-  unreal/             # заготовка
-
-slicer_app/
-  main.py             # composition root для standalone/CLI
-  controller.py       # “хранитель основной логики” из концепции
+blender_slicer/
+  __init__.py         # bl_info, ленивая регистрация (без импорта bpy)
+  protocol/
+    version.py        # PROTOCOL_VERSION, SCHEMA_VERSION
+    units.py          # мм/градусы, проверка конечных чисел
+    types.py          # umbrella-реэкспорт публичных типов
+    shapes.py         # Contour, Slice (включая offset_mm), FoldSpec, ContourRole
+    material.py       # MaterialProfile, section_radius, clearance
+    operations.py     # OperationSpec, TargetSelector, FailurePolicy
+    request.py        # ProcessingRequest, RequestOptions
+    result.py         # ProcessingResult, SliceResult, ContourResult, Metrics
+    diagnostics.py    # Diagnostic, Severity, ErrorCode
+    geometry.py       # normalize, signed_area, fillet_corners, collapse_collinear
+    offset.py         # offset_polyline: miter/round/bevel + предупреждения
+    shrink.py         # shrink_points: ужимание сечения к центру
+    json_codec.py     # dataclasses ↔ JSON, loads_result
+  spatial/
+    vectors.py        # 3D-векторы без внешних библиотек
+    frames.py         # CoordinateFrame, FrameStore, verify_roundtrip
+    contacts.py       # find_contacts, ContactPoint
+  engine/
+    __init__.py       # публичный фасад
+    facade.py         # Engine: descriptor / validate / process / process_parallel
+    registry.py       # MethodRegistry, регистрация встроенных методов
+    parallel.py       # split_request, merge_results, ThreadPoolExecutor
+    pipeline/
+      runner.py       # normalize → offset → operations → validate
+      selection.py    # TargetSelector → конкретные контуры
+      policies.py     # strict / per_slice / best_effort
+      state.py        # изменяемое состояние одного среза внутри вызова
+    methods/
+      base.py         # Method Protocol, MethodContext, StageOutput
+      normalize.py, resample.py, simplify.py, smooth.py, fillet.py,
+      densify.py, curvature.py, bend_check.py, local.py, repair.py,
+      offset.py       # offset_contour — отступ как метод пайплайна
+      shrink.py       # shrink_section — ужимание + сглаживание
+    validation/
+      invariants.py   # геометрические инварианты
+      limits.py       # лимиты точек/срезов/операций
+    cli.py            # describe | validate | process --workers
+  preview/
+    svg.py            # render_result_svg, render_layers_svg
+    cli.py            # предпросмотр без GUI
+  adapters/
+    base/
+      host.py         # HostAdapter Protocol
+      plan.py         # SlicePlan, CutOffsetPolicy (X outward, Z inward)
+      layers.py       # SliceLayer, LayerStore — итерации срезов
+      runtime.py      # RuntimeState: слои, кадры, результаты
+      events.py       # EventBus, темы событий
+      engine_client.py# клиент движка, решает про потоки
+      controller.py   # AppController — «хранитель логики»
+      ui.py           # Widget/Builder/GuiConfig Protocol
+      visualization.py# общий контракт отрисовки
+      export.py       # ExportManager
+    blender/
+      adapter.py      # мост настроек Blender → план/запрос
+      host.py         # BlenderHost
+      slicing.py      # меш + плоскости → Slice/Frames
+      visualization.py# кривые слоёв и контакты
+      panels.py       # панели Slice и Layers
+      operators.py    # генерация, обработка, контакты, слои, экспорт
+      properties.py   # SlicerSettings
+      ui_schema.py    # декларативные секции полей
+      settings_io.py  # экспорт/импорт настроек
+      i18n.py         # регистрация каталога в bpy.app.translations
+  i18n/
+    __init__.py       # SUPPORTED_LOCALES, t(), normalize_locale
+  app/
+    controller.py     # реэкспорт AppController из adapters.base
+    main.py           # standalone CLI (--request/--svg/--workers)
 ```
+
+`spatial` выделен отдельно: кадры и контакты — это 3D, но они не зависят от
+хоста. Движок по-прежнему видит только 2D и `frame_id`.
+
+Слои (`SliceLayer`/`LayerStore`) — тоже уровень адаптера: один слой на план
+срезов, поэтому X- и Z-проходы хранятся, обрабатываются и рисуются вместе, но
+независимо.
 
 Пакет `slicer_protocol` намеренно отделён от движка: адаптеры и предпросмотр
 зависят от **контракта**, а не от версии алгоритмов. Это и есть Core Protocol
@@ -201,6 +213,11 @@ Version из концепции.
 * `Engine.process()` потокобезопасен, если реестр не мутируется. Адаптер
   сериализует доступ к `RuntimeState`; тяжёлый вызов уходит в worker-поток,
   результат возвращается в UI-поток через планировщик хоста.
+* Решение о многопоточности принимает клиент (`EngineClient`), а движок лишь
+  исполняет: `Engine.process_parallel` делит запрос на непрерывные чанки и
+  сливает результаты в исходном порядке. `FailurePolicy.STRICT` всегда идёт
+  последовательным путём, чтобы отмена целого запроса не изменила смысл.
+  Хост без потоков передаёт `workers=1` и использует тот же код.
 * Кеш: ключ = SHA-256 от канонического JSON запроса + `engine_version`.
   Инвалидация — при изменении материала, операций, геометрии среза или плана
   срезов. Кеш живёт в адаптере; движок о нём не знает.
@@ -213,7 +230,9 @@ Version из концепции.
 | Новый хост | новый пакет в `slicer_adapters` | движок и протокол |
 | Новый формат экспорта | `ExportManager` в адаптере | геометрия и результат |
 | Новый рендер | новый модуль в `slicer_preview` | контракт |
-| 3D-unfold / offset / kerf | отдельный будущий пакет или метод с явным контрактом | ядро v1 |
+| Новый отступ / kerf-политика | параметры `offset_contour` или новый метод | пайплайн, контракт |
+| Новый анализ сборки | модуль в `spatial/` (как `contacts.py`) | движок и протокол |
+| 3D-unfold / сборка модели | отдельный будущий пакет | ядро v1 |
 
 Расширение методов не требует правок `Engine`: реестр передаётся в конструктор
 или дополняется до первого вызова. Динамическая загрузка стороннего кода из

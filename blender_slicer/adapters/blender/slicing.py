@@ -7,8 +7,9 @@ import bpy
 from mathutils import Vector
 
 from ...protocol.errors import ConfigError
-from ...adapters.base.frames import CoordinateFrame, make_frame
+from ...spatial.frames import CoordinateFrame, make_frame
 from ...protocol.types import Contour, ContourRole, Slice
+from ...adapters.base.plan import SlicePlan
 
 
 def axis_vector(name: str) -> Vector:
@@ -174,19 +175,21 @@ def chain_segments(
     return loops
 
 
-def _plan(context, settings, center: Vector) -> list[tuple[int, Vector, Vector, Vector, dict]]:
+def _plan(
+    plan: SlicePlan, center: Vector
+) -> list[tuple[int, Vector, Vector, Vector, dict]]:
     """Return (index, origin, normal, u_hint, metadata) for each plane."""
-    scale = max(1e-9, float(settings.unit_scale_mm))
-    axis = axis_vector(settings.axis).normalized()
-    mode = settings.slice_mode
+    scale = max(1e-9, float(plan.unit_scale_mm))
+    axis = axis_vector(plan.axis).normalized()
+    mode = "RADIAL" if plan.mode == "radial" else "PLANAR"
     planes: list[tuple[int, Vector, Vector, Vector, dict]] = []
-    count = max(1, int(settings.count))
+    count = max(1, int(plan.count))
 
     if mode == "RADIAL":
         u_hint = default_u_hint(axis).normalized()
         v_hint = axis.cross(u_hint).normalized()
-        start = float(settings.angle_start_deg)
-        end = float(settings.angle_end_deg)
+        start = float(plan.angle_start_deg)
+        end = float(plan.angle_end_deg)
         span = end - start
         if abs(span) < 1e-6:
             span = 360.0
@@ -208,9 +211,9 @@ def _plan(context, settings, center: Vector) -> list[tuple[int, Vector, Vector, 
             )
         return planes
 
-    spacing_bu = float(settings.spacing_mm) / scale
-    offset_bu = float(settings.offset_mm) / scale
-    if settings.centered:
+    spacing_bu = float(plan.spacing_mm) / scale
+    offset_bu = float(plan.offset_mm) / scale
+    if plan.centered:
         start = -(count - 1) * spacing_bu * 0.5 + offset_bu
     else:
         start = offset_bu
@@ -218,7 +221,7 @@ def _plan(context, settings, center: Vector) -> list[tuple[int, Vector, Vector, 
     for i in range(count):
         t = start + i * spacing_bu
         origin = center + axis * t
-        offset_mm = (t + (count - 1) * spacing_bu * 0.5 if settings.centered else t) * scale
+        offset_mm = (t + (count - 1) * spacing_bu * 0.5 if plan.centered else t) * scale
         planes.append(
             (
                 i,
@@ -231,17 +234,21 @@ def _plan(context, settings, center: Vector) -> list[tuple[int, Vector, Vector, 
     return planes
 
 
-def generate_slices(context, settings) -> tuple[list[Slice], dict[str, CoordinateFrame]]:
+def generate_slices(
+    context, settings, plan: SlicePlan | None = None
+) -> tuple[list[Slice], dict[str, CoordinateFrame]]:
     obj = settings.source_object
     if obj is None or obj.type != "MESH":
         raise ConfigError("Select a mesh object as the slice source")
-    scale = float(settings.unit_scale_mm)
+    plan = plan or SlicePlan.from_settings(settings)
+    scale = float(plan.unit_scale_mm)
     if scale <= 0:
         raise ConfigError("Unit scale must be positive")
 
     verts, tris = world_triangles(context, obj)
-    center = bbox_center(verts) + Vector(settings.origin_offset_mm) / scale
-    planes = _plan(context, settings, center)
+    center = bbox_center(verts) + Vector(plan.origin_offset_mm) / scale
+    planes = _plan(plan, center)
+    cut_offset_mm = plan.cut_offset_for(plan.axis)
 
     slices: list[Slice] = []
     frames: dict[str, CoordinateFrame] = {}
@@ -278,7 +285,8 @@ def generate_slices(context, settings) -> tuple[list[Slice], dict[str, Coordinat
                 index=index,
                 contours=contours,
                 frame_id=frame_id,
-                metadata=metadata,
+                metadata={**metadata, "cut_offset_mm": cut_offset_mm},
+                offset_mm=cut_offset_mm,
             )
         )
     return slices, frames

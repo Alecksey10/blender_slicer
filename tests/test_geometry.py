@@ -6,10 +6,11 @@ import math
 import random
 import unittest
 
-from blender_slicer.core.errors import DomainError
-from blender_slicer.core.geometry import (
+from blender_slicer.protocol.errors import DomainError
+from blender_slicer.protocol.geometry import (
     bend_allowance_mm,
     chaikin,
+    collapse_collinear,
     count_self_intersections,
     dedupe,
     densify,
@@ -299,6 +300,45 @@ class DensifyAndCurvatureTests(unittest.TestCase):
         points, _ = limit_curvature(line, False, 2.0, 5, 0.5)
         self.assertEqual(points[0], line[0])
         self.assertEqual(points[-1], line[-1])
+
+
+class CollinearInvarianceTests(unittest.TestCase):
+    """Mesh triangulation adds points on straight edges; they must not matter."""
+
+    def test_collinear_subdivision_does_not_change_the_fillet(self):
+        plain = [(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)]
+        subdivided = [
+            (0.0, 0.0),
+            (0.05, 0.0),
+            (5.0, 0.0),
+            (10.0, 0.0),
+            (10.0, 5.0),
+            (10.0, 10.0),
+            (5.0, 10.0),
+            (0.0, 10.0),
+            (0.0, 5.0),
+        ]
+        reference, warnings_a = fillet_corners(plain, True, 4.0, 20.0, 3, mode="error")
+        result, warnings_b = fillet_corners(subdivided, True, 4.0, 20.0, 3, mode="error")
+        self.assertEqual(warnings_a, [])
+        self.assertEqual(warnings_b, [])
+        self.assertEqual(len(result), len(reference))
+        for point_a, point_b in zip(reference, result):
+            self.assertAlmostEqual(point_a[0], point_b[0], places=9)
+            self.assertAlmostEqual(point_a[1], point_b[1], places=9)
+        self.assertAlmostEqual(min_radius(result, True), min_radius(reference, True), places=9)
+
+    def test_collapse_keeps_real_corners_and_open_ends(self):
+        self.assertEqual(
+            collapse_collinear([(0.0, 0.0), (5.0, 0.0), (5.0, 5.0)], False),
+            [(0.0, 0.0), (5.0, 0.0), (5.0, 5.0)],
+        )
+        # A fully straight polyline has no corners to protect: it is kept as
+        # written, and only redundant points inside a shape are removed.
+        self.assertEqual(
+            collapse_collinear([(0.0, 0.0), (5.0, 0.0), (10.0, 0.0)], False),
+            [(0.0, 0.0), (5.0, 0.0), (10.0, 0.0)],
+        )
 
 
 if __name__ == "__main__":
