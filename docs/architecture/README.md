@@ -34,6 +34,15 @@
 * [examples/ui.schema.example.json](examples/ui.schema.example.json)
 * [examples/preview.slice0.svg](examples/preview.slice0.svg) — как выглядит срез
 
+## Связанные документы
+
+* [../plan/README.md](../plan/README.md) — концептуальный план модульного
+  развития и порядок рефакторинга.
+* [../requirements/host_environments.md](../requirements/host_environments.md) —
+  требования к Blender, FreeCAD, CLI и API как к конечным средам.
+* [../requirements/api_environment.md](../requirements/api_environment.md) —
+  требования к серверной среде API.
+
 ## Быстрый взгляд на решения
 
 | № | Решение | Почему |

@@ -73,7 +73,15 @@ blender_slicer/
     request.py        # ProcessingRequest, RequestOptions
     result.py         # ProcessingResult, SliceResult, ContourResult, Metrics
     diagnostics.py    # Diagnostic, Severity, ErrorCode
-    geometry.py       # normalize, signed_area, fillet_corners, collapse_collinear
+    geometry/         # 2D-ядро, разбитое по ответственности
+      core.py         # векторы, длины, углы, радиусы, dedupe
+      intersections.py# точка в полигоне, самопересечения
+      resampling.py   # resample, densify
+      simplification.py # simplify, sharp_corners
+      smoothing.py    # chaikin, laplacian, limit_curvature
+      corners.py      # collapse_collinear, fillet, trim tight corners
+      thin.py         # cut_thin_sections
+      sheet.py        # bend_allowance_mm
     offset.py         # offset_polyline: miter/round/bevel + предупреждения
     shrink.py         # shrink_points: ужимание сечения к центру
     json_codec.py     # dataclasses ↔ JSON, loads_result

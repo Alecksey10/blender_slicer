@@ -6,6 +6,7 @@ from ..protocol.descriptor import MethodDescriptor, ParamSpec
 from ..protocol.errors import DomainError
 from .methods import (
     BendCheckMethod,
+    CutThinSectionsMethod,
     DensifyMethod,
     FilletMethod,
     LimitCurvatureMethod,
@@ -15,6 +16,7 @@ from .methods import (
     ShrinkMethod,
     SimplifyMethod,
     SmoothMethod,
+    TrimTightCornersMethod,
 )
 from ..protocol.types import ErrorCode
 
@@ -66,6 +68,8 @@ class MethodRegistry:
         registry = cls()
         for method in (
             OffsetMethod(),
+            CutThinSectionsMethod(),
+            TrimTightCornersMethod(),
             FilletMethod(),
             SmoothMethod(),
             SimplifyMethod(),

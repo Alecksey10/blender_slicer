@@ -176,7 +176,7 @@ def chain_segments(
 
 
 def _plan(
-    plan: SlicePlan, center: Vector
+    plan: SlicePlan, center: Vector, extent_mm: float | None = None
 ) -> list[tuple[int, Vector, Vector, Vector, dict]]:
     """Return (index, origin, normal, u_hint, metadata) for each plane."""
     scale = max(1e-9, float(plan.unit_scale_mm))
@@ -211,7 +211,13 @@ def _plan(
             )
         return planes
 
-    spacing_bu = float(plan.spacing_mm) / scale
+    if plan.auto_spacing:
+        # Equal margins of spacing / 2 at both ends: count slices cover the
+        # model extent without cutting exactly on its bounding faces.
+        spacing_mm = max(0.0, float(extent_mm or 0.0)) / float(count)
+    else:
+        spacing_mm = float(plan.spacing_mm)
+    spacing_bu = spacing_mm / scale
     offset_bu = float(plan.offset_mm) / scale
     if plan.centered:
         start = -(count - 1) * spacing_bu * 0.5 + offset_bu
@@ -228,7 +234,11 @@ def _plan(
                 origin,
                 axis,
                 u_hint,
-                {"slice_mode": "planar", "offset_mm": offset_mm},
+                {
+                    "slice_mode": "planar",
+                    "offset_mm": offset_mm,
+                    "spacing_mm": spacing_mm,
+                },
             )
         )
     return planes
@@ -247,7 +257,12 @@ def generate_slices(
 
     verts, tris = world_triangles(context, obj)
     center = bbox_center(verts) + Vector(plan.origin_offset_mm) / scale
-    planes = _plan(plan, center)
+    axis = axis_vector(plan.axis).normalized()
+    projections = [v.dot(axis) for v in verts]
+    extent_mm = (max(projections) - min(projections)) * scale
+    if plan.auto_spacing and extent_mm <= 1e-9:
+        raise ConfigError("Auto spacing needs a non-zero extent along the slice axis")
+    planes = _plan(plan, center, extent_mm)
     cut_offset_mm = plan.cut_offset_for(plan.axis)
 
     slices: list[Slice] = []

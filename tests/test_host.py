@@ -191,9 +191,16 @@ class PanelDrawTests(unittest.TestCase):
             cls for cls in self.panels.SECTION_PANELS if cls.bl_idname == "SLICER_PT_plan"
         )
         planar = [name for _obj, name in self._draw(panel_class).props()]
+        self.assertIn("spacing_auto", planar)
         self.assertIn("spacing_mm", planar)
         self.assertIn("centered", planar)
         self.assertNotIn("angle_start_deg", planar)
+
+        self.settings.spacing_auto = True
+        automatic = [name for _obj, name in self._draw(panel_class).props()]
+        self.assertIn("spacing_auto", automatic)
+        self.assertNotIn("spacing_mm", automatic)
+        self.settings.spacing_auto = False
 
         self.settings.slice_mode = "RADIAL"
         radial = [name for _obj, name in self._draw(panel_class).props()]
@@ -318,6 +325,29 @@ class SlicingTests(unittest.TestCase):
         slices, _ = slicing.generate_slices(self.context, settings)
         offsets = [s.metadata["offset_mm"] for s in slices]
         self.assertEqual(offsets, sorted(offsets))
+
+    def test_auto_spacing_distributes_slices_across_the_model(self):
+        settings = fake_blender.make_settings(
+            source_object=self.object, count=5, spacing_auto=True
+        )
+        slices, _ = slicing.generate_slices(self.context, settings)
+        offsets = [s.metadata["offset_mm"] for s in slices]
+        # Cube is 1000 mm tall; 5 slices -> 200 mm spacing, equal margins.
+        # offset_mm is measured from the first slice, so it runs 0..800.
+        self.assertAlmostEqual(slices[0].metadata["spacing_mm"], 200.0, places=6)
+        self.assertEqual(len(offsets), 5)
+        self.assertAlmostEqual(offsets[0], 0.0, places=6)
+        self.assertAlmostEqual(offsets[-1], 800.0, places=6)
+        for before, after in zip(offsets, offsets[1:]):
+            self.assertAlmostEqual(after - before, 200.0, places=6)
+
+    def test_auto_spacing_single_slice_is_centered(self):
+        settings = fake_blender.make_settings(
+            source_object=self.object, count=1, spacing_auto=True
+        )
+        slices, _ = slicing.generate_slices(self.context, settings)
+        self.assertEqual(len(slices), 1)
+        self.assertAlmostEqual(slices[0].metadata["offset_mm"], 0.0, places=6)
 
     def test_radial_mode_builds_rotated_planes(self):
         settings = fake_blender.make_settings(

@@ -78,3 +78,23 @@ def with_points(contour: Contour, points: list[tuple[float, float]]) -> Contour:
     out = contour.clone()
     out.points = points
     return out
+
+
+def emit_warnings(ctx: MethodContext, warnings: list[dict]) -> None:
+    """Turn geometry-layer warning dicts into method diagnostics.
+
+    Geometry helpers stay host-agnostic and return plain dicts; this is the
+    single place where they become ``Diagnostic`` objects, so methods do not
+    repeat the same severity/point/details mapping.
+    """
+
+    for warning in warnings:
+        code = warning["code"]
+        kwargs = {
+            "point_index": warning.get("point_index"),
+            "details": warning.get("details"),
+        }
+        if warning.get("severity") == "info" or code == ErrorCode.I_INFO:
+            ctx.info(code, warning["message"], **kwargs)
+        else:
+            ctx.warn(code, warning["message"], **kwargs)

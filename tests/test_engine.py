@@ -265,6 +265,126 @@ class PipelineTests(unittest.TestCase):
         self.assertEqual(result.status, ResultStatus.OK)
         self.assertFalse(result.slices[0].changed)
 
+    def test_cut_thin_sections_removes_thin_tab(self):
+        # 20x18 square with a thin 1mm tab on top. min_width_mm=4 removes the
+        # tab; main body corners have long edges so fillet radius 4 fits.
+        contour = [
+            (0.0, 0.0), (20.0, 0.0), (20.0, 18.0),
+            (19.0, 18.0), (19.0, 19.0), (17.0, 19.0), (17.0, 18.0), (0.0, 18.0),
+        ]
+        request = _request(
+            [_slice(contour)],
+            [
+                OperationSpec(
+                    method="cut_thin_sections",
+                    params={
+                        "min_width_mm": 4.0,
+                        "corner_turn_deg": 20.0,
+                        "max_removed_ratio": 0.5,
+                    },
+                ),
+                OperationSpec(method="fillet_corners", params={"radius_mm": 4.0, "mode": "error"}),
+            ],
+        )
+        result = self.engine.process(request)
+        self.assertEqual(result.status, ResultStatus.OK, result.slices[0].diagnostics)
+        out = _contour(result.slices[0], "s0.c0")
+        self.assertTrue(out.changed)
+        self.assertNotIn((19.0, 19.0), out.points)
+        self.assertNotIn((17.0, 19.0), out.points)
+
+    def test_cut_thin_sections_prevents_fillet_failure(self):
+        # Without cut_thin_sections, the tab's tight corners make fillet
+        # radius 4 fail (error mode).  With cut_thin_sections first, fillet
+        # succeeds because the tab is gone and main body corners are wide.
+        contour = [
+            (0.0, 0.0), (20.0, 0.0), (20.0, 18.0),
+            (19.0, 18.0), (19.0, 19.0), (17.0, 19.0), (17.0, 18.0), (0.0, 18.0),
+        ]
+        # Fillet alone should fail on this contour.
+        request_fail = _request(
+            [_slice(contour)],
+            [OperationSpec(method="fillet_corners", params={"radius_mm": 4.0, "mode": "error"})],
+        )
+        result_fail = self.engine.process(request_fail)
+        self.assertIn(result_fail.status, (ResultStatus.PARTIAL, ResultStatus.ERROR))
+
+        # With cut_thin_sections first, fillet succeeds.
+        request_ok = _request(
+            [_slice(contour)],
+            [
+                OperationSpec(
+                    method="cut_thin_sections",
+                    params={"min_width_mm": 4.0, "corner_turn_deg": 20.0, "max_removed_ratio": 0.5},
+                ),
+                OperationSpec(method="fillet_corners", params={"radius_mm": 4.0, "mode": "error"}),
+            ],
+        )
+        result_ok = self.engine.process(request_ok)
+        self.assertEqual(result_ok.status, ResultStatus.OK)
+
+    def test_trim_tight_corners_prevents_fillet_failure(self):
+        contour = [
+            (0.0, 0.0), (4.0, 0.0), (8.0, 0.0), (12.0, 0.0),
+            (16.0, 0.0), (20.0, 0.0), (20.0, 9.0), (20.0, 18.0),
+            (19.0, 18.0), (19.0, 19.0), (17.0, 19.0), (17.0, 18.0),
+            (12.0, 18.0), (6.0, 18.0), (0.0, 18.0), (0.0, 9.0),
+        ]
+        fillet = OperationSpec(
+            method="fillet_corners", params={"radius_mm": 4.0, "mode": "error"}
+        )
+        result_fail = self.engine.process(_request([_slice(contour)], [fillet]))
+        self.assertIn(result_fail.status, (ResultStatus.PARTIAL, ResultStatus.ERROR))
+
+        request_ok = _request(
+            [_slice(contour)],
+            [
+                OperationSpec(
+                    method="trim_tight_corners",
+                    params={
+                        "radius_mm": 4.0,
+                        "min_turn_deg": 20.0,
+                        "max_removed_ratio": 0.5,
+                        "action": "trim",
+                    },
+                ),
+                fillet,
+            ],
+        )
+        result_ok = self.engine.process(request_ok)
+        self.assertEqual(result_ok.status, ResultStatus.OK, result_ok.slices[0].diagnostics)
+        out = _contour(result_ok.slices[0], "s0.c0")
+        self.assertNotIn((19.0, 19.0), out.points)
+        self.assertNotIn((17.0, 19.0), out.points)
+
+    def test_trim_tight_corners_can_ignore_the_contour(self):
+        contour = [(0.0, 0.0), (1.0, 0.0), (1.0, 1.0)]
+        request = _request(
+            [_slice(contour)],
+            [
+                OperationSpec(
+                    method="trim_tight_corners",
+                    params={"radius_mm": 5.0, "action": "ignore"},
+                )
+            ],
+        )
+        result = self.engine.process(request)
+        self.assertEqual(result.status, ResultStatus.OK)
+        out = _contour(result.slices[0], "s0.c0")
+        self.assertEqual(out.points, contour)
+        self.assertFalse(out.changed)
+        self.assertIn(ErrorCode.I_INFO, _codes(result.slices[0].diagnostics))
+
+    def test_cut_thin_sections_is_noop_on_regular_contour(self):
+        request = _request(
+            [_slice(SQUARE)],
+            [OperationSpec(method="cut_thin_sections", params={"min_width_mm": 4.0})],
+        )
+        result = self.engine.process(request)
+        self.assertEqual(result.status, ResultStatus.OK)
+        self.assertFalse(result.slices[0].changed)
+        self.assertEqual(_contour(result.slices[0], "s0.c0").points, SQUARE)
+
 
 class SelectorTests(unittest.TestCase):
     def setUp(self):

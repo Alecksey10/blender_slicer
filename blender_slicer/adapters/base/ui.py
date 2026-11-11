@@ -83,6 +83,14 @@ def condition(spec: dict[str, Any]) -> Condition:
 
 
 def make_field(
-    prop: str, label: str | None = None, visible: dict[str, Any] | None = None
+    prop: str,
+    label: str | None = None,
+    visible: dict[str, Any] | list[dict[str, Any]] | tuple[dict[str, Any], ...] | None = None,
 ) -> Field:
-    return Field(prop, label, (condition(visible),) if visible else ())
+    if visible is None:
+        specs: list[dict[str, Any]] = []
+    elif isinstance(visible, dict):
+        specs = [visible]
+    else:
+        specs = list(visible)
+    return Field(prop, label, tuple(condition(spec) for spec in specs))

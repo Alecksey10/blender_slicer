@@ -61,7 +61,11 @@ def validate_settings(settings) -> None:
         errors.append("1 BU in mm must be positive")
     if settings.count < 1:
         errors.append("Slice count must be at least 1")
-    if settings.slice_mode == "PLANAR" and settings.spacing_mm <= 0:
+    if (
+        settings.slice_mode == "PLANAR"
+        and not getattr(settings, "spacing_auto", False)
+        and settings.spacing_mm <= 0
+    ):
         errors.append("Slice spacing must be positive")
     if settings.slice_mode == "RADIAL":
         if abs(settings.angle_end_deg - settings.angle_start_deg) < 1e-6:
@@ -85,6 +89,16 @@ def validate_settings(settings) -> None:
             errors.append("Fillet radius cannot be negative")
         if settings.fillet_arc_segments < 1:
             errors.append("Fillet arc segments must be >= 1")
+    if getattr(settings, "cut_thin_enabled", False):
+        if getattr(settings, "cut_thin_min_width_mm", 0.0) <= 0:
+            errors.append("Cut thin min width must be positive")
+        if not (0.0 <= getattr(settings, "cut_thin_max_removed_ratio", 0.5) <= 1.0):
+            errors.append("Cut thin max removed ratio must be in [0, 1]")
+    if getattr(settings, "trim_tight_enabled", False):
+        if getattr(settings, "trim_tight_radius_mm", 0.0) < 0:
+            errors.append("Trim tight radius cannot be negative")
+        if not (0.0 <= getattr(settings, "trim_tight_max_removed_ratio", 0.5) <= 1.0):
+            errors.append("Trim tight max removed ratio must be in [0, 1]")
     if settings.smooth_enabled and settings.smooth_iterations < 0:
         errors.append("Smooth iterations cannot be negative")
     if settings.simplify_enabled and settings.simplify_tolerance_mm < 0:
@@ -110,15 +124,25 @@ def material_from_settings(settings) -> MaterialProfile:
     )
 
 
+def _operation(method: str, params: dict) -> OperationSpec:
+    """Build a cut-role operation; every Blender stage targets cut contours."""
+
+    return OperationSpec(
+        method=method,
+        params=params,
+        target=TargetSelector(roles=(ContourRole.CUT,)),
+    )
+
+
 def operations_from_settings(settings) -> list[OperationSpec]:
     operations: list[OperationSpec] = []
     if bool(getattr(settings, "shrink_enabled", False)):
         # The per-slice ratio is attached by the controller; the engine applies
         # it and smooths the result before offsets and fillets.
         operations.append(
-            OperationSpec(
-                method="shrink_section",
-                params={
+            _operation(
+                "shrink_section",
+                {
                     "use_slice_ratio": True,
                     "ratio": 1.0,
                     "anchor": "centroid",
@@ -127,24 +151,59 @@ def operations_from_settings(settings) -> list[OperationSpec]:
                     ),
                     "preserve_corners_deg": 70.0,
                 },
-                target=TargetSelector(roles=(ContourRole.CUT,)),
             )
         )
     if bool(getattr(settings, "inset_enabled", False)):
         # The signed distance lives on each slice (Slice.offset_mm); the engine
         # only applies it, so the host owns the axis policy.
         operations.append(
-            OperationSpec(
-                method="offset_contour",
-                params={"use_slice_offset": True, "distance_mm": 0.0},
-                target=TargetSelector(roles=(ContourRole.CUT,)),
+            _operation(
+                "offset_contour",
+                {"use_slice_offset": True, "distance_mm": 0.0},
+            )
+        )
+    if bool(getattr(settings, "cut_thin_enabled", False)):
+        operations.append(
+            _operation(
+                "cut_thin_sections",
+                {
+                    "min_width_mm": float(
+                        getattr(settings, "cut_thin_min_width_mm", 8.0)
+                    ),
+                    "corner_turn_deg": float(
+                        getattr(settings, "cut_thin_corner_turn_deg", 20.0)
+                    ),
+                    "max_removed_ratio": float(
+                        getattr(settings, "cut_thin_max_removed_ratio", 0.5)
+                    ),
+                },
+            )
+        )
+    if bool(getattr(settings, "trim_tight_enabled", False)):
+        operations.append(
+            _operation(
+                "trim_tight_corners",
+                {
+                    "radius_mm": float(
+                        getattr(settings, "trim_tight_radius_mm", 4.0)
+                    ),
+                    "min_turn_deg": float(
+                        getattr(settings, "trim_tight_min_turn_deg", 20.0)
+                    ),
+                    "max_removed_ratio": float(
+                        getattr(settings, "trim_tight_max_removed_ratio", 0.5)
+                    ),
+                    "action": str(
+                        getattr(settings, "trim_tight_action", "trim")
+                    ),
+                },
             )
         )
     if settings.fillet_enabled:
         operations.append(
-            OperationSpec(
-                method="fillet_corners",
-                params={
+            _operation(
+                "fillet_corners",
+                {
                     "radius_mm": float(settings.fillet_radius_mm),
                     "min_turn_deg": float(settings.fillet_min_turn_deg),
                     "arc_segments": int(settings.fillet_arc_segments),
@@ -156,9 +215,9 @@ def operations_from_settings(settings) -> list[OperationSpec]:
         )
     if settings.smooth_enabled:
         operations.append(
-            OperationSpec(
-                method="smooth",
-                params={
+            _operation(
+                "smooth",
+                {
                     "algorithm": settings.smooth_algorithm,
                     "iterations": int(settings.smooth_iterations),
                     "preserve_corners_deg": float(settings.smooth_preserve_corners_deg),
@@ -169,9 +228,9 @@ def operations_from_settings(settings) -> list[OperationSpec]:
         )
     if settings.simplify_enabled:
         operations.append(
-            OperationSpec(
-                method="simplify",
-                params={
+            _operation(
+                "simplify",
+                {
                     "tolerance_mm": float(settings.simplify_tolerance_mm),
                     "preserve_corners_deg": float(settings.simplify_preserve_corners_deg),
                 },
@@ -179,9 +238,9 @@ def operations_from_settings(settings) -> list[OperationSpec]:
         )
     if settings.densify_enabled:
         operations.append(
-            OperationSpec(
-                method="densify",
-                params={
+            _operation(
+                "densify",
+                {
                     "max_spacing_mm": float(settings.densify_max_spacing_mm),
                     "max_angle_step_deg": float(settings.densify_max_angle_step_deg),
                     "chord_tolerance_mm": float(settings.densify_chord_tolerance_mm),
@@ -190,9 +249,9 @@ def operations_from_settings(settings) -> list[OperationSpec]:
         )
     if settings.resample_enabled:
         operations.append(
-            OperationSpec(
-                method="resample",
-                params={
+            _operation(
+                "resample",
+                {
                     "spacing_mm": float(settings.resample_spacing_mm),
                     "adaptive": bool(settings.resample_adaptive),
                     "min_spacing_mm": float(settings.resample_min_spacing_mm),
@@ -202,9 +261,9 @@ def operations_from_settings(settings) -> list[OperationSpec]:
         )
     if settings.limit_curvature_enabled:
         operations.append(
-            OperationSpec(
-                method="limit_curvature",
-                params={
+            _operation(
+                "limit_curvature",
+                {
                     "use_material_min_radius": bool(settings.limit_curvature_use_material),
                     "min_radius_mm": float(settings.limit_curvature_min_radius_mm),
                     "max_iterations": int(settings.limit_curvature_max_iterations),
@@ -214,7 +273,6 @@ def operations_from_settings(settings) -> list[OperationSpec]:
             )
         )
     return operations
-
 
 def build_request(settings, slices=None) -> ProcessingRequest:
     plan = SlicePlan.from_settings(settings)
@@ -261,9 +319,12 @@ def generate(context, settings) -> int:
     settings.last_warnings = 0
     settings.last_contacts = 0
     settings.status = f"Generated {len(layer.slices)} slices"
-    settings.status_detail = (
-        f"{settings.last_points} points, {len(layer.frames)} frames · {layer.name}"
-    )
+    detail = f"{settings.last_points} points, {len(layer.frames)} frames · {layer.name}"
+    if getattr(settings, "spacing_auto", False) and layer.slices:
+        effective = layer.slices[0].metadata.get("spacing_mm")
+        if effective is not None:
+            detail += f" · auto spacing {float(effective):.3f} mm"
+    settings.status_detail = detail
     settings.diagnostics_text = ""
     RUNTIME.dirty = False
     BUS.publish(TOPIC_UI_REDRAW, context=context)

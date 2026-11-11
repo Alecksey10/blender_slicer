@@ -3,7 +3,7 @@ from __future__ import annotations
 from ...protocol.descriptor import Choice, MethodDescriptor, ParamSpec
 from ...protocol.geometry import fillet_corners
 from ...protocol.types import Contour
-from .base import Method, MethodContext, with_points
+from .base import Method, MethodContext, emit_warnings, with_points
 
 
 class FilletMethod(Method):
@@ -64,11 +64,5 @@ class FilletMethod(Method):
             chord_tolerance_mm=float(params["chord_tolerance_mm"]),
             material_min_radius_mm=material_min,
         )
-        for w in warnings:
-            ctx.warn(
-                w["code"],
-                w["message"],
-                point_index=w.get("point_index"),
-                details=w.get("details"),
-            )
+        emit_warnings(ctx, warnings)
         return with_points(contour, points)

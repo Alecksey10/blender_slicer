@@ -56,6 +56,15 @@ class SlicerSettings(bpy.types.PropertyGroup):
         name="Spacing", default=5.0, min=0.001, soft_max=1000.0, step=0.1,
         update=_mark_dirty,
     )
+    spacing_auto: bpy.props.BoolProperty(
+        name="Auto spacing",
+        description=(
+            "Distribute the slices evenly across the model along the active "
+            "axis: spacing = model extent / count"
+        ),
+        default=False,
+        update=_mark_dirty,
+    )
     offset_mm: bpy.props.FloatProperty(
         name="Offset", default=0.0, step=0.1, update=_mark_dirty
     )
@@ -123,6 +132,110 @@ class SlicerSettings(bpy.types.PropertyGroup):
     )
     fillet_check_material: bpy.props.BoolProperty(
         name="Check material radius", default=True, update=_mark_dirty
+    )
+
+    # -------------------------------------------------------- cut thin sections
+    cut_thin_enabled: bpy.props.BoolProperty(
+        name="Cut thin sections",
+        description=(
+            "Remove thin tabs/necks that are narrower than the fillet radius, "
+            "so the fillet stage no longer fails on them. Runs before fillet."
+        ),
+        default=False,
+        update=_mark_dirty,
+    )
+    cut_thin_min_width_mm: bpy.props.FloatProperty(
+        name="Min width (mm)",
+        description=(
+            "Sections narrower than this are cut off. "
+            "Set to 2 x fillet radius so corners have room on both sides."
+        ),
+        default=8.0,
+        min=0.1,
+        step=0.1,
+        update=_mark_dirty,
+    )
+    cut_thin_corner_turn_deg: bpy.props.FloatProperty(
+        name="Min corner turn",
+        description="Only corners with a turn above this angle are considered",
+        default=20.0,
+        min=0.0,
+        max=179.0,
+        step=1.0,
+        update=_mark_dirty,
+    )
+    cut_thin_max_removed_ratio: bpy.props.FloatProperty(
+        name="Max removed ratio",
+        description=(
+            "Safety limit: if more than this fraction of vertices would be "
+            "removed, the contour is kept unchanged."
+        ),
+        default=0.5,
+        min=0.0,
+        max=1.0,
+        step=0.05,
+        update=_mark_dirty,
+    )
+
+    # ------------------------------------------------------- trim tight corners
+    trim_tight_enabled: bpy.props.BoolProperty(
+        name="Trim tight corners",
+        description=(
+            "Cut sections that are too tight for the requested fillet radius "
+            "and join the curve where the full radius fits. Runs before fillet; "
+            "disable to keep the current clamp/skip behaviour."
+        ),
+        default=False,
+        update=_mark_dirty,
+    )
+    trim_tight_radius_mm: bpy.props.FloatProperty(
+        name="Fillet radius (mm)",
+        description=(
+            "Radius that must fit after trimming. Usually the same as the "
+            "fillet radius."
+        ),
+        default=4.0,
+        min=0.0,
+        step=0.1,
+        update=_mark_dirty,
+    )
+    trim_tight_min_turn_deg: bpy.props.FloatProperty(
+        name="Min corner turn",
+        description="Only corners with a turn above this angle are trimmed",
+        default=20.0,
+        min=0.0,
+        max=179.0,
+        step=1.0,
+        update=_mark_dirty,
+    )
+    trim_tight_max_removed_ratio: bpy.props.FloatProperty(
+        name="Max removed ratio",
+        description=(
+            "Safety limit: trimming stops before more than this fraction of "
+            "the contour vertices is removed"
+        ),
+        default=0.5,
+        min=0.0,
+        max=1.0,
+        step=0.05,
+        update=_mark_dirty,
+    )
+    trim_tight_action: bpy.props.EnumProperty(
+        name="If radius does not fit",
+        items=(
+            (
+                "trim",
+                "Trim the curve",
+                "Cut the too-tight section and join across it",
+            ),
+            (
+                "ignore",
+                "Leave it to fillet",
+                "Keep the contour; fillet clamps or skips the corner as before",
+            ),
+        ),
+        default="trim",
+        update=_mark_dirty,
     )
 
     # ----------------------------------------------------------------- smooth

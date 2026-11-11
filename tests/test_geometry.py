@@ -7,11 +7,13 @@ import random
 import unittest
 
 from blender_slicer.protocol.errors import DomainError
+from blender_slicer.protocol.types import ErrorCode
 from blender_slicer.protocol.geometry import (
     bend_allowance_mm,
     chaikin,
     collapse_collinear,
     count_self_intersections,
+    cut_thin_sections,
     dedupe,
     densify,
     dist,
@@ -28,6 +30,8 @@ from blender_slicer.protocol.geometry import (
     sharp_corners,
     signed_area,
     simplify,
+    tight_corners,
+    trim_tight_corners,
     vertex_radius,
 )
 
@@ -268,12 +272,76 @@ class FilletTests(unittest.TestCase):
         points, warnings = fillet_corners(line, False, 0.5, 20.0, 3)
         self.assertEqual(points, line)
 
+    def test_near_collinear_mesh_noise_does_not_consume_corner_room(self):
+        # A 0.0005 mm deviation on a 5 mm edge turns the vertex by ~0.006 deg.
+        # It is mesh noise, not a corner: it must not halve the free room of
+        # the real corner and make it clamp while an identical one does not.
+        noisy = [(0.0, 0.0), (5.0, 0.0004), (10.0, 0.0), (10.0, 10.0)]
+        points, warnings = fillet_corners(
+            noisy, False, 4.0, 20.0, 3, mode="error"
+        )
+        self.assertEqual(warnings, [])
+        self.assertTrue(_has_point(points, (6.0, 0.0)))
+        self.assertTrue(_has_point(points, (10.0, 4.0)))
+
+    def test_exact_fit_does_not_depend_on_float_noise(self):
+        corner = [(0.0, 0.0), (5.0, 0.0), (5.0, 5.0)]
+        _, warnings = fillet_corners(
+            corner, False, 2.5 + 1e-13, 20.0, 3, mode="clamp"
+        )
+        self.assertEqual(warnings, [])
+
     def test_material_minimum_radius_produces_warning(self):
         _, warnings = fillet_corners(
             SQUARE, True, 2.0, 20.0, 2, material_min_radius_mm=6.0
         )
         self.assertEqual(len(warnings), 4)
         self.assertTrue(all("below material" in w["message"] for w in warnings))
+
+
+class TrimTightCornersTests(unittest.TestCase):
+    def test_trims_a_tab_that_cannot_hold_the_radius(self):
+        # 20x18 plate with a 2x1 mm tab: its corners need 4 mm of free room
+        # for radius 4 and are cut off together with the join back to the body.
+        contour = [
+            (0.0, 0.0), (4.0, 0.0), (8.0, 0.0), (12.0, 0.0),
+            (16.0, 0.0), (20.0, 0.0), (20.0, 9.0), (20.0, 18.0),
+            (19.0, 18.0), (19.0, 19.0), (17.0, 19.0), (17.0, 18.0),
+            (12.0, 18.0), (6.0, 18.0), (0.0, 18.0), (0.0, 9.0),
+        ]
+        self.assertTrue(tight_corners(contour, True, 4.0))
+        points, warnings = trim_tight_corners(contour, True, 4.0, 20.0, 0.5)
+        self.assertLess(len(points), len(contour))
+        self.assertNotIn((19.0, 19.0), points)
+        self.assertNotIn((17.0, 19.0), points)
+        self.assertEqual(tight_corners(points, True, 4.0), [])
+        self.assertGreater(abs(signed_area(points)), 0.0)
+        self.assertTrue(any(w["code"] == ErrorCode.I_INFO for w in warnings))
+
+    def test_guard_keeps_a_small_contour_unchanged(self):
+        square = [(0.0, 0.0), (5.0, 0.0), (5.0, 5.0), (0.0, 5.0)]
+        points, warnings = trim_tight_corners(square, True, 4.0)
+        self.assertEqual(points, square)
+        self.assertTrue(any("kept unchanged" in w["message"] for w in warnings))
+
+    def test_open_contour_endpoints_are_never_removed(self):
+        line = [
+            (0.0, 0.0), (5.0, 0.0), (5.0, 0.2),
+            (5.2, 0.2), (5.2, 0.0), (10.0, 0.0),
+        ]
+        points, _ = trim_tight_corners(
+            line, False, 2.0, min_turn_deg=20.0, max_removed_ratio=1.0
+        )
+        self.assertEqual(points[0], line[0])
+        self.assertEqual(points[-1], line[-1])
+        self.assertLess(len(points), len(line))
+        self.assertTrue(all(abs(point[1]) <= 1e-9 for point in points))
+
+    def test_ignore_reports_without_touching_geometry(self):
+        corner = [(0.0, 0.0), (1.0, 0.0), (1.0, 1.0)]
+        found = tight_corners(corner, False, 5.0)
+        self.assertEqual(len(found), 1)
+        self.assertLess(found[0][1], 5.0)
 
 
 class DensifyAndCurvatureTests(unittest.TestCase):
@@ -339,6 +407,93 @@ class CollinearInvarianceTests(unittest.TestCase):
             collapse_collinear([(0.0, 0.0), (5.0, 0.0), (10.0, 0.0)], False),
             [(0.0, 0.0), (5.0, 0.0), (10.0, 0.0)],
         )
+
+
+class CutThinSectionsTests(unittest.TestCase):
+    def test_thin_tab_is_cut_off(self):
+        # A 10x4 rectangle with a thin 1mm x 1mm tab on the top edge.
+        # min_width_mm=4: the tab's corners have both adjacent edges < 4mm,
+        # so r_max = 0.5mm < 2mm => the tab is cut off.
+        contour = [
+            (0.0, 0.0),
+            (10.0, 0.0),
+            (10.0, 4.0),
+            (9.0, 4.0),
+            (9.0, 5.0),  # thin tab tip
+            (7.0, 5.0),
+            (7.0, 4.0),
+            (0.0, 4.0),
+        ]
+        result, warnings = cut_thin_sections(contour, True, min_width_mm=4.0)
+        # Tab vertices are removed; the top edge becomes flat from x=10 to x=0.
+        self.assertNotIn((9.0, 5.0), result)
+        self.assertNotIn((7.0, 5.0), result)
+        # The remaining contour is the 10x4 rectangle (5 points after dedupe
+        # may keep a collinear point at (7,4) on the top edge).
+        self.assertGreaterEqual(len(result), 4)
+        self.assertTrue(any(abs(p[0] - 10.0) < 1e-9 and abs(p[1] - 4.0) < 1e-9 for p in result))
+        self.assertTrue(any(abs(p[0] - 0.0) < 1e-9 and abs(p[1] - 4.0) < 1e-9 for p in result))
+        self.assertGreater(len(warnings), 0)
+        self.assertTrue(any("Cut" in w["message"] for w in warnings))
+
+    def test_no_thin_sections_is_noop(self):
+        square = [(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)]
+        result, warnings = cut_thin_sections(square, True, min_width_mm=4.0)
+        self.assertEqual(result, square)
+        self.assertEqual(warnings, [])
+
+    def test_small_min_width_does_not_cut(self):
+        # A thin protrusion but min_width_mm is tiny => nothing is thin.
+        contour = [
+            (0.0, 0.0), (10.0, 0.0), (10.0, 4.0),
+            (9.0, 4.0), (9.0, 5.0), (7.0, 5.0), (7.0, 4.0), (0.0, 4.0),
+        ]
+        result, warnings = cut_thin_sections(contour, True, min_width_mm=0.5)
+        self.assertEqual(len(result), len(contour))
+        self.assertEqual(warnings, [])
+
+    def test_narrow_rectangle_is_not_cut(self):
+        # A narrow 10x1 rectangle: corners have one long edge (10mm) so they
+        # are not thin even though the contour is narrow overall.
+        thin_rect = [
+            (0.0, 0.0), (10.0, 0.0), (10.0, 1.0), (0.0, 1.0),
+        ]
+        result, warnings = cut_thin_sections(thin_rect, True, min_width_mm=4.0)
+        self.assertEqual(result, thin_rect)
+        self.assertEqual(warnings, [])
+
+    def test_open_polyline_endpoints_are_never_cut(self):
+        # Open line with a thin spike in the middle.
+        line = [
+            (0.0, 0.0), (5.0, 0.0), (5.0, 1.0), (6.0, 1.0), (6.0, 0.0), (10.0, 0.0),
+        ]
+        result, warnings = cut_thin_sections(line, False, min_width_mm=4.0)
+        # Endpoints (0,0) and (10,0) are protected.
+        self.assertEqual(result[0], (0.0, 0.0))
+        self.assertEqual(result[-1], (10.0, 0.0))
+
+    def test_corner_turn_threshold(self):
+        # A nearly straight vertex should not be considered thin even if edges
+        # are short.
+        contour = [
+            (0.0, 0.0), (10.0, 0.0), (10.5, 0.05), (11.0, 0.0), (20.0, 0.0),
+            (20.0, 10.0), (0.0, 10.0),
+        ]
+        result, _ = cut_thin_sections(contour, True, min_width_mm=4.0, corner_turn_deg=80.0)
+        # The shallow turn at (10.5, 0.05) is below 80 deg => not cut.
+        self.assertTrue(any(abs(p[0] - 10.5) < 1e-9 and abs(p[1] - 0.05) < 1e-9 for p in result))
+
+    def test_max_removed_ratio_protects_contour(self):
+        # Many thin tabs: removing them all would exceed the ratio limit.
+        # Build a contour with lots of short-edge corners.
+        pts = []
+        for i in range(20):
+            pts.append((float(i), 0.0))
+            pts.append((float(i), 1.0))
+        result, warnings = cut_thin_sections(pts, True, min_width_mm=4.0, max_removed_ratio=0.1)
+        # Nothing removed because ratio limit prevents it.
+        self.assertEqual(len(result), len(pts))
+        self.assertTrue(any("limit" in w["message"] or "kept unchanged" in w["message"] for w in warnings))
 
 
 if __name__ == "__main__":

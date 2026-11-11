@@ -34,7 +34,17 @@ SECTIONS: tuple[Section, ...] = (
             make_field("axis"),
             make_field("count"),
             make_field(
-                "spacing_mm", "Spacing (mm)", visible={"prop": "slice_mode", "equals": "PLANAR"}
+                "spacing_auto",
+                "Auto spacing",
+                visible={"prop": "slice_mode", "equals": "PLANAR"},
+            ),
+            make_field(
+                "spacing_mm",
+                "Spacing (mm)",
+                visible=[
+                    {"prop": "slice_mode", "equals": "PLANAR"},
+                    {"prop": "spacing_auto", "truthy": False},
+                ],
             ),
             make_field(
                 "offset_mm", "Offset (mm)", visible={"prop": "slice_mode", "equals": "PLANAR"}
@@ -143,6 +153,55 @@ SECTIONS: tuple[Section, ...] = (
                 "fillet_check_material",
                 "Check material radius",
                 visible={"prop": "fillet_enabled", "truthy": True},
+            ),
+        ),
+    ),
+    Section(
+        id="cut_thin",
+        title="Cut thin sections",
+        fields=(
+            make_field("cut_thin_enabled"),
+            make_field(
+                "cut_thin_min_width_mm",
+                "Min width (mm)",
+                visible={"prop": "cut_thin_enabled", "truthy": True},
+            ),
+            make_field(
+                "cut_thin_corner_turn_deg",
+                "Min corner turn (deg)",
+                visible={"prop": "cut_thin_enabled", "truthy": True},
+            ),
+            make_field(
+                "cut_thin_max_removed_ratio",
+                "Max removed ratio",
+                visible={"prop": "cut_thin_enabled", "truthy": True},
+            ),
+        ),
+    ),
+    Section(
+        id="trim_tight",
+        title="Trim tight corners",
+        fields=(
+            make_field("trim_tight_enabled"),
+            make_field(
+                "trim_tight_radius_mm",
+                "Fillet radius (mm)",
+                visible={"prop": "trim_tight_enabled", "truthy": True},
+            ),
+            make_field(
+                "trim_tight_min_turn_deg",
+                "Min corner turn (deg)",
+                visible={"prop": "trim_tight_enabled", "truthy": True},
+            ),
+            make_field(
+                "trim_tight_max_removed_ratio",
+                "Max removed ratio",
+                visible={"prop": "trim_tight_enabled", "truthy": True},
+            ),
+            make_field(
+                "trim_tight_action",
+                "If it does not fit",
+                visible={"prop": "trim_tight_enabled", "truthy": True},
             ),
         ),
     ),

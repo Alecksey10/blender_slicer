@@ -131,6 +131,7 @@ class SlicePlan:
     axis: str = "Z"
     count: int = 20
     spacing_mm: float = 5.0
+    auto_spacing: bool = False
     offset_mm: float = 0.0
     centered: bool = True
     angle_start_deg: float = 0.0
@@ -150,6 +151,7 @@ class SlicePlan:
             axis=str(getattr(settings, "axis", "Z")).upper(),
             count=int(getattr(settings, "count", 20)),
             spacing_mm=float(getattr(settings, "spacing_mm", 5.0)),
+            auto_spacing=bool(getattr(settings, "spacing_auto", False)),
             offset_mm=float(getattr(settings, "offset_mm", 0.0)),
             centered=bool(getattr(settings, "centered", True)),
             angle_start_deg=float(getattr(settings, "angle_start_deg", 0.0)),

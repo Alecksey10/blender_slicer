@@ -45,6 +45,7 @@ from ..spatial.frames import CoordinateFrame, FrameStore, make_frame
 from .facade import Engine, describe_methods
 from .methods import (
     BendCheckMethod,
+    CutThinSectionsMethod,
     DensifyMethod,
     FilletMethod,
     LimitCurvatureMethod,
@@ -87,6 +88,7 @@ __all__ = [
     "ShrinkMethod",
     "LimitCurvatureMethod",
     "BendCheckMethod",
+    "CutThinSectionsMethod",
     "Point2",
     "ContourRole",
     "Severity",
