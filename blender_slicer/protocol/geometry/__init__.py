@@ -59,6 +59,11 @@ from .smoothing import (
     limit_curvature,
 )
 
+from .approximation import (
+    evaluate_bezier_cubic,
+    approximate_smooth_curve,
+)
+
 from .corners import (
     collapse_collinear,
     fillet_corners,
@@ -73,6 +78,14 @@ from .thin import (
 
 from .sheet import (
     bend_allowance_mm,
+)
+
+from .optimization import (
+    curve_curvature,
+    optimize_curve,
+    resample_by_count,
+    turn_angle_at,
+    turn_limit,
 )
 
 __all__ = [
@@ -113,6 +126,8 @@ __all__ = [
     "chaikin",
     "laplacian",
     "limit_curvature",
+    "evaluate_bezier_cubic",
+    "approximate_smooth_curve",
     "collapse_collinear",
     "fillet_corners",
     "tight_corners",
@@ -120,4 +135,9 @@ __all__ = [
     "trim_tight_corners",
     "cut_thin_sections",
     "bend_allowance_mm",
+    "curve_curvature",
+    "optimize_curve",
+    "resample_by_count",
+    "turn_angle_at",
+    "turn_limit",
 ]

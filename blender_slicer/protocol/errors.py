@@ -33,3 +33,12 @@ class DomainError(SlicerError):
 
 class ConfigError(SlicerError):
     """Invalid addon/project configuration."""
+
+
+class Cancelled(SlicerError):
+    """The host cancelled the running request.
+
+    Deliberately *not* a :class:`DomainError`: a cancellation is not a property
+    of the geometry, so it must never become a Diagnostic or be swallowed by a
+    failure policy.  It travels straight up to the caller that asked to stop.
+    """

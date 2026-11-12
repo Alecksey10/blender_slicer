@@ -8,6 +8,8 @@ All geometry stays in the engine, all 3D in the host.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 from ...adapters.base.engine_client import EngineClient
 from ...adapters.base.events import (
     BUS,
@@ -38,7 +40,7 @@ from ...protocol.types import (
     TargetSelector,
 )
 from ...spatial.contacts import ContactPoint
-from . import slicing, visualization
+from . import jobs, slicing, visualization
 from .host import BlenderHost
 
 # Shared, stateless engine.  Its registry is read-only, so parallel calls are
@@ -99,8 +101,39 @@ def validate_settings(settings) -> None:
             errors.append("Trim tight radius cannot be negative")
         if not (0.0 <= getattr(settings, "trim_tight_max_removed_ratio", 0.5) <= 1.0):
             errors.append("Trim tight max removed ratio must be in [0, 1]")
-    if settings.smooth_enabled and settings.smooth_iterations < 0:
-        errors.append("Smooth iterations cannot be negative")
+    if getattr(settings, "smooth_curve_enabled", False):
+        if settings.smooth_curve_inertia < 0 or settings.smooth_curve_inertia > 1:
+            errors.append("Curve inertia must be in [0, 1]")
+        if settings.smooth_curve_tension < 0 or settings.smooth_curve_tension > 1:
+            errors.append("Curve tension must be in [0, 1]")
+        if settings.smooth_curve_max_deviation_mm < 0:
+            errors.append("Max deviation cannot be negative")
+        if settings.smooth_curve_chord_tolerance_mm < 0:
+            errors.append("Chord tolerance cannot be negative")
+        if settings.smooth_curve_max_spacing_mm < 0:
+            errors.append("Max spacing cannot be negative")
+        if settings.smooth_curve_segments_per_span < 2:
+            errors.append("Segments per span must be >= 2")
+        if not (0.0 <= settings.smooth_curve_preserve_corners_deg <= 180.0):
+            errors.append("Preserve corners must be in [0, 180]")
+        if settings.smooth_curve_inertia_smoothing < 0:
+            errors.append("Inertia passes cannot be negative")
+        if settings.smooth_curve_min_radius_mm < 0:
+            errors.append("Min radius cannot be negative")
+    if getattr(settings, "optimize_enabled", False):
+        if getattr(settings, "optimize_points", 0) < 8:
+            errors.append("Curve samples must be >= 8")
+        if getattr(settings, "optimize_max_iterations", 0) < 1:
+            errors.append("Optimizer iterations must be >= 1")
+        for name in (
+            "optimize_data_weight",
+            "optimize_smooth",
+            "optimize_min_radius_mm",
+            "optimize_radius_weight",
+            "optimize_cost_tolerance",
+        ):
+            if getattr(settings, name, 0.0) < 0:
+                errors.append(f"{name} cannot be negative")
     if settings.simplify_enabled and settings.simplify_tolerance_mm < 0:
         errors.append("Simplify tolerance cannot be negative")
     if settings.densify_enabled and settings.densify_max_spacing_mm <= 0:
@@ -135,6 +168,11 @@ def _operation(method: str, params: dict) -> OperationSpec:
 
 
 def operations_from_settings(settings) -> list[OperationSpec]:
+    # The global least-squares fit replaces the sequential shaping heuristics:
+    # running both would fight over the same corners.
+    optimize = bool(getattr(settings, "optimize_enabled", False))
+    legacy_shaping = not optimize
+
     operations: list[OperationSpec] = []
     if bool(getattr(settings, "shrink_enabled", False)):
         # The per-slice ratio is attached by the controller; the engine applies
@@ -162,7 +200,7 @@ def operations_from_settings(settings) -> list[OperationSpec]:
                 {"use_slice_offset": True, "distance_mm": 0.0},
             )
         )
-    if bool(getattr(settings, "cut_thin_enabled", False)):
+    if legacy_shaping and bool(getattr(settings, "cut_thin_enabled", False)):
         operations.append(
             _operation(
                 "cut_thin_sections",
@@ -179,7 +217,7 @@ def operations_from_settings(settings) -> list[OperationSpec]:
                 },
             )
         )
-    if bool(getattr(settings, "trim_tight_enabled", False)):
+    if legacy_shaping and bool(getattr(settings, "trim_tight_enabled", False)):
         operations.append(
             _operation(
                 "trim_tight_corners",
@@ -199,7 +237,7 @@ def operations_from_settings(settings) -> list[OperationSpec]:
                 },
             )
         )
-    if settings.fillet_enabled:
+    if legacy_shaping and settings.fillet_enabled:
         operations.append(
             _operation(
                 "fillet_corners",
@@ -213,16 +251,34 @@ def operations_from_settings(settings) -> list[OperationSpec]:
                 },
             )
         )
-    if settings.smooth_enabled:
+    if legacy_shaping and getattr(settings, "smooth_curve_enabled", False):
         operations.append(
             _operation(
-                "smooth",
+                "smooth_curve_approx",
                 {
-                    "algorithm": settings.smooth_algorithm,
-                    "iterations": int(settings.smooth_iterations),
-                    "preserve_corners_deg": float(settings.smooth_preserve_corners_deg),
-                    "max_deviation_mm": float(settings.smooth_max_deviation_mm),
-                    "weight": float(settings.smooth_weight),
+                    "use_material_min_radius": bool(
+                        settings.smooth_curve_use_material_min_radius
+                    ),
+                    "min_radius_mm": float(settings.smooth_curve_min_radius_mm),
+                    "mode": str(settings.smooth_curve_mode),
+                    "tension": float(settings.smooth_curve_tension),
+                    "max_deviation_mm": float(
+                        settings.smooth_curve_max_deviation_mm
+                    ),
+                    "preserve_corners_deg": float(
+                        settings.smooth_curve_preserve_corners_deg
+                    ),
+                    "chord_tolerance_mm": float(
+                        settings.smooth_curve_chord_tolerance_mm
+                    ),
+                    "max_spacing_mm": float(settings.smooth_curve_max_spacing_mm),
+                    "segments_per_span": int(
+                        settings.smooth_curve_segments_per_span
+                    ),
+                    "inertia_smoothing": int(
+                        settings.smooth_curve_inertia_smoothing
+                    ),
+                    "inertia": float(settings.smooth_curve_inertia),
                 },
             )
         )
@@ -233,6 +289,38 @@ def operations_from_settings(settings) -> list[OperationSpec]:
                 {
                     "tolerance_mm": float(settings.simplify_tolerance_mm),
                     "preserve_corners_deg": float(settings.simplify_preserve_corners_deg),
+                },
+            )
+        )
+    if getattr(settings, "optimize_enabled", False):
+        # Last shaping stage before the output density is set: one global fit
+        # replaces corner-by-corner clamping, minimising deviation, bending
+        # energy and the bend-radius violation together.  Running it after
+        # simplify keeps the simplifier from re-sharpening the fitted bends.
+        operations.append(
+            _operation(
+                "optimize_curve",
+                {
+                    "sample_points": int(getattr(settings, "optimize_points", 150)),
+                    "data_weight": float(
+                        getattr(settings, "optimize_data_weight", 20.0)
+                    ),
+                    "smooth": float(getattr(settings, "optimize_smooth", 2.0)),
+                    "use_material_min_radius": bool(
+                        getattr(settings, "optimize_use_material_min_radius", True)
+                    ),
+                    "min_radius_mm": float(
+                        getattr(settings, "optimize_min_radius_mm", 6.0)
+                    ),
+                    "radius_weight": float(
+                        getattr(settings, "optimize_radius_weight", 1000.0)
+                    ),
+                    "max_iterations": int(
+                        getattr(settings, "optimize_max_iterations", 40)
+                    ),
+                    "cost_tolerance": float(
+                        getattr(settings, "optimize_cost_tolerance", 1e-6)
+                    ),
                 },
             )
         )
@@ -259,7 +347,7 @@ def operations_from_settings(settings) -> list[OperationSpec]:
                 },
             )
         )
-    if settings.limit_curvature_enabled:
+    if legacy_shaping and settings.limit_curvature_enabled:
         operations.append(
             _operation(
                 "limit_curvature",
@@ -274,15 +362,45 @@ def operations_from_settings(settings) -> list[OperationSpec]:
         )
     return operations
 
-def build_request(settings, slices=None) -> ProcessingRequest:
+@dataclass(frozen=True)
+class RequestTemplate:
+    """A request without its slices, snapshotted on the UI thread.
+
+    Reading RNA properties is a main-thread operation, so a background job gets
+    this plain value and binds it to the slices it produced itself; the worker
+    then never touches ``settings``.
+    """
+
+    request_id: str
+    material: MaterialProfile
+    operations: list[OperationSpec]
+    targets: TargetSelector
+    failure_policy: FailurePolicy
+    options: RequestOptions
+    limits: Limits
+    metadata: dict
+
+    def bind(self, slices) -> ProcessingRequest:
+        return ProcessingRequest(
+            request_id=self.request_id,
+            units="mm",
+            material=self.material,
+            operations=self.operations,
+            slices=list(slices),
+            targets=self.targets,
+            failure_policy=self.failure_policy,
+            options=self.options,
+            limits=self.limits,
+            metadata=dict(self.metadata),
+        )
+
+
+def request_template(settings) -> RequestTemplate:
     plan = SlicePlan.from_settings(settings)
-    slice_list = list(RUNTIME.slices if slices is None else slices)
-    return ProcessingRequest(
+    return RequestTemplate(
         request_id=f"blender-{settings.revision}-{settings.count}",
-        units="mm",
         material=material_from_settings(settings),
         operations=operations_from_settings(settings),
-        slices=slice_list,
         targets=TargetSelector(roles=(ContourRole.CUT,)),
         failure_policy=FailurePolicy.PER_SLICE,
         options=RequestOptions(
@@ -301,9 +419,17 @@ def build_request(settings, slices=None) -> ProcessingRequest:
     )
 
 
-def _controller(context, settings) -> AppController:
-    threads = int(getattr(settings, "threads", 0) or 0)
-    client = EngineClient(engine=ENGINE, workers=None if threads <= 0 else threads)
+def build_request(settings, slices=None) -> ProcessingRequest:
+    return request_template(settings).bind(
+        RUNTIME.slices if slices is None else slices
+    )
+
+
+def _controller(context, settings, workers=None) -> AppController:
+    if workers is None:
+        threads = int(getattr(settings, "threads", 0) or 0)
+        workers = None if threads <= 0 else threads
+    client = EngineClient(engine=ENGINE, workers=workers)
     return AppController(BlenderHost(context, settings), RUNTIME.layers, client)
 
 
@@ -331,7 +457,9 @@ def generate(context, settings) -> int:
     return len(layer.slices)
 
 
-def process_current(context, settings) -> ProcessingResult:
+def _process_target(context, settings) -> tuple[SliceLayer, ProcessingRequest]:
+    """Validate the session and return the layer plus the engine request."""
+
     validate_settings(settings)
     plan = SlicePlan.from_settings(settings)
     layer = _layer_for_plan(plan)
@@ -339,13 +467,141 @@ def process_current(context, settings) -> ProcessingResult:
         raise ConfigError("Generate slices first")
     if layer.revision != int(settings.revision):
         raise ConfigError("Slices are outdated - generate them again")
+    return layer, build_request(settings, layer.slices)
 
+
+def process_current(context, settings) -> ProcessingResult:
+    layer, request = _process_target(context, settings)
     BUS.publish(TOPIC_PROCESS_STARTED, settings=settings, context=context)
-    summary = _controller(context, settings).process(build_request(settings, layer.slices), layer)
+    controller = _controller(context, settings)
+    summary = controller.process(request, layer)
+    _finish_processing(context, settings, controller, summary)
+    return summary.result
+
+
+def start_process(context, settings) -> bool:
+    """Process the existing slices in a worker thread."""
+
+    return start_run(context, settings, regenerate=False)
+
+
+def start_run(context, settings, regenerate: bool = False) -> bool:
+    """Slice and process everything off the UI thread.
+
+    Returns ``False`` when the host has no timers, so the caller can fall back
+    to the blocking path.  Only two things happen before the job starts: the
+    settings are snapshotted into plain values, and (when regenerating) the
+    evaluated mesh is copied into a plain triangle soup.  Slicing, the engine
+    and the progress bookkeeping then run in one worker thread, while the main
+    thread is left with nothing but the status line and the viewport.
+    """
+
+    if not jobs.timer_available():
+        return False
+    validate_settings(settings)
+
+    plan = SlicePlan.from_settings(settings)
+    template = request_template(settings)
+    geometry = None
+    layer: SliceLayer | None = None
+    if regenerate:
+        # The only bpy touch of the job: read the evaluated mesh once.
+        geometry = slicing.collect_geometry(context, settings.source_object)
+    else:
+        layer = _layer_for_plan(plan)
+        if layer is None or not layer.slices:
+            raise ConfigError("Generate slices first")
+        if layer.revision != int(settings.revision):
+            raise ConfigError("Slices are outdated - generate them again")
+
+    # One worker thread: extra threads share the GIL and only add contention
+    # with Blender's own thread.
+    controller = _controller(context, settings, workers=1)
+    BUS.publish(TOPIC_PROCESS_STARTED, settings=settings, context=context)
+
+    def work(reporter):
+        # No bpy call from here on: plain data in, plain data out.
+        slices = frames = None
+        if geometry is not None:
+            slices, frames = slicing.build_slices(
+                geometry[0],
+                geometry[1],
+                plan,
+                progress=lambda done, total: reporter.update(
+                    stage="slicing",
+                    fraction=done / float(max(1, total)),
+                    message=f"plane {done}/{total}",
+                ),
+                cancel=reporter.cancelled,
+            )
+        source = layer.slices if slices is None else slices
+        result = controller.client.process(template.bind(source), reporter=reporter)
+        return slices, frames, result
+
+    def apply(payload) -> None:
+        # Main thread: register the layer, publish, then draw in small steps.
+        slices, frames, result = payload
+        target = layer
+        if slices is not None:
+            target = controller.adopt_layer(
+                plan, slices, frames, int(settings.revision)
+            )
+            settings.dirty = False
+            RUNTIME.dirty = False
+            settings.last_slices = len(slices)
+            settings.last_points = sum(item.point_count for item in slices)
+        # The host queues the drawing, so this publish is cheap: the curves
+        # appear over the next timer ticks instead of in one blocking call.
+        summary = controller.apply_result(result, target)
+        _finish_processing(context, settings, controller, summary)
+
+    def finish(error: str | None = None, cancelled: bool = False) -> None:
+        settings.job_cancelling = False
+        if cancelled:
+            settings.status = "Cancelled"
+            settings.status_detail = "Cancelled; the previous result is kept"
+        elif error:
+            settings.status = "Error"
+            settings.status_detail = error
+            settings.diagnostics_text = error
+        BUS.publish(TOPIC_UI_REDRAW, context=context)
+
+    try:
+        started = jobs.start("run", work, apply=apply, finish=finish)
+    except RuntimeError as exc:
+        raise ConfigError(str(exc)) from exc
+    if not started:
+        return False
+
+    settings.job_running = True
+    settings.job_progress = 0.0
+    settings.job_cancelling = False
+    settings.job_message = "slicing" if regenerate else "processing slices"
+    settings.status = "Working..."
+    settings.status_detail = "Running in a background thread; press Cancel to stop"
+    BUS.publish(TOPIC_UI_REDRAW, context=context)
+    return True
+
+
+def cancel_process(context, settings) -> bool:
+    """Ask the running job to stop; the scene keeps the last good result."""
+
+    if not jobs.JOBS.cancel():
+        return False
+    settings.job_cancelling = True
+    settings.job_message = "cancelling..."
+    settings.status = "Cancelling..."
+    BUS.publish(TOPIC_UI_REDRAW, context=context)
+    return True
+
+
+def _finish_processing(context, settings, controller, summary: ProcessSummary) -> None:
     _update_status(settings, summary)
+    settings.job_running = False
+    settings.job_progress = 0.0
 
     if getattr(settings, "contacts_enabled", False):
-        contacts = _controller(context, settings).find_contacts(
+        contacts = controller.find_contacts(
             gap_mm=float(getattr(settings, "contacts_gap_mm", 1.0)),
             include_same_layer=bool(getattr(settings, "contacts_include_same", False)),
         )
@@ -359,7 +615,6 @@ def process_current(context, settings) -> ProcessingResult:
             TOPIC_PROCESS_COMPLETED, result=summary.result, settings=settings, context=context
         )
     BUS.publish(TOPIC_UI_REDRAW, context=context)
-    return summary.result
 
 
 def _layer_for_plan(plan: SlicePlan) -> SliceLayer | None:
@@ -372,7 +627,11 @@ def _layer_for_plan(plan: SlicePlan) -> SliceLayer | None:
     return active
 
 
-def run(context, settings) -> ProcessingResult:
+def run(context, settings) -> ProcessingResult | None:
+    """Generate slices, then process them (in the background when possible)."""
+
+    if start_run(context, settings, regenerate=True):
+        return None
     generate(context, settings)
     return process_current(context, settings)
 
@@ -400,7 +659,8 @@ def set_layer_visible(context, settings, layer_id: str) -> bool:
 
 
 def remove_layer(context, settings, layer_id: str) -> bool:
-    removed = _controller(context, settings).remove_layer(layer_id)
+    controller = _controller(context, settings)
+    removed = controller.remove_layer(layer_id)
     BUS.publish(TOPIC_UI_REDRAW, context=context)
     return removed
 

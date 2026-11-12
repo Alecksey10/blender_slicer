@@ -7,10 +7,12 @@ from .curvature import LimitCurvatureMethod
 from .densify import DensifyMethod
 from .fillet import FilletMethod
 from .offset import OffsetMethod
+from .optimize import OptimizeCurveMethod
 from .resample import ResampleMethod
 from .shrink import ShrinkMethod
 from .simplify import SimplifyMethod
 from .smooth import SmoothMethod
+from .smooth_curve_approx import SmoothCurveApproxMethod
 from .trim_tight import TrimTightCornersMethod
 
 __all__ = [
@@ -24,9 +26,11 @@ __all__ = [
     "DensifyMethod",
     "FilletMethod",
     "OffsetMethod",
+    "OptimizeCurveMethod",
     "ResampleMethod",
     "ShrinkMethod",
     "SimplifyMethod",
     "SmoothMethod",
+    "SmoothCurveApproxMethod",
     "TrimTightCornersMethod",
 ]

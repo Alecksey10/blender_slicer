@@ -11,11 +11,17 @@ optionally, between neighbouring slices of the same layer.  When two contours
 really cross, **every** intersection point is reported (deduplicated); when
 they only come close, the single closest pair is reported, so a parallel pass
 does not flood the viewport with redundant points.
+
+A processed layer is analysed through its *result* curves: the result is what
+the user sees and cuts, while the source slices are only the input of the
+engine.  Using the source for contacts put the markers on geometry that was no
+longer displayed.
 """
 
 from __future__ import annotations
 
 import itertools
+import math
 from dataclasses import dataclass
 from typing import Iterable, Protocol
 
@@ -27,8 +33,12 @@ from .vectors import v3_add, v3_dist, v3_dot, v3_lerp, v3_mul, v3_sub
 #: Below this distance two segments are considered to intersect.
 INTERSECTION_EPS_MM = 1e-6
 
-#: Dense contours are sampled so contact search stays interactive.
+#: Dense contours are thinned before the search stays interactive.  Thinning
+#: keeps the outline (Douglas-Peucker) instead of dropping segments.
 MAX_SEGMENTS_PER_CONTOUR = 160
+
+#: How far a thinned chord may stray from the points it replaces.
+CONTACT_SIMPLIFY_MM = 0.01
 
 #: Default cap for one request; the adapter can render fewer.
 DEFAULT_MAX_CONTACTS = 2000
@@ -115,21 +125,152 @@ def _closest_on_segments(
     return v3_dist(point1, point2), point1, point2
 
 
-def _segments(points: list[Point2], closed: bool) -> Iterable[tuple[Point2, Point2]]:
+def _point_segment_distance(p: Vec3, a: Vec3, b: Vec3) -> float:
+    ab = v3_sub(b, a)
+    length2 = v3_dot(ab, ab)
+    if length2 <= 1e-18:
+        return v3_dist(p, a)
+    t = v3_dot(v3_sub(p, a), ab) / length2
+    t = 0.0 if t < 0.0 else (1.0 if t > 1.0 else t)
+    return v3_dist(p, v3_add(a, v3_mul(ab, t)))
+
+
+def _dp_chain(points: list[Vec3], chain: list[int], tolerance: float) -> list[int]:
+    """Douglas-Peucker over a chain of point indices."""
+
+    keep = [False] * len(chain)
+    keep[0] = True
+    keep[-1] = True
+    stack = [(0, len(chain) - 1)]
+    while stack:
+        i, j = stack.pop()
+        if j <= i + 1:
+            continue
+        a = points[chain[i]]
+        b = points[chain[j]]
+        worst = tolerance
+        worst_k = -1
+        for k in range(i + 1, j):
+            distance = _point_segment_distance(points[chain[k]], a, b)
+            if distance > worst:
+                worst = distance
+                worst_k = k
+        if worst_k >= 0:
+            keep[worst_k] = True
+            stack.append((i, worst_k))
+            stack.append((worst_k, j))
+    return [chain[k] for k in range(len(chain)) if keep[k]]
+
+
+def _simplify_indices(points: list[Vec3], closed: bool, tolerance: float) -> list[int]:
+    """Indices of the points that describe the contour within ``tolerance``."""
+
+    n = len(points)
+    if n <= 3 or tolerance <= 0.0:
+        return list(range(n))
+    if not closed:
+        return _dp_chain(points, list(range(n)), tolerance)
+    # Split the loop into two arcs so the result does not depend on the start.
+    far = max(range(1, n), key=lambda i: v3_dist(points[0], points[i]))
+    if far == 0:
+        return list(range(n))
+    first = _dp_chain(points, list(range(0, far + 1)), tolerance)
+    second = _dp_chain(points, list(range(far, n)) + [0], tolerance)
+    return sorted(set(first) | set(second))
+
+
+def _chain_error(points: list[Vec3], i: int, j: int, a: Vec3, b: Vec3) -> float:
+    """Largest distance of the points a chord replaces from the chord itself."""
+
+    n = len(points)
+    if j <= i:
+        j += n
+    worst = 0.0
+    for k in range(i + 1, j):
+        distance = _point_segment_distance(points[k % n], a, b)
+        if distance > worst:
+            worst = distance
+    return worst
+
+
+def _chords(
+    points: list[Vec3],
+    closed: bool,
+    max_segments: int = MAX_SEGMENTS_PER_CONTOUR,
+    tolerance: float = CONTACT_SIMPLIFY_MM,
+) -> list[tuple[Vec3, Vec3, float]]:
+    """Straight chords that cover the **whole** contour, with a shape error each.
+
+    The search used to sample ``range(0, count, step)`` and therefore tested
+    only every n-th segment: with the dense contours the engine produces (150
+    to 2500 points) that left most of the outline unchecked, so crossings lying
+    in the skipped part were never reported.  Thinning by Douglas-Peucker keeps
+    the outline and returns, per chord, how far it may sit from the real curve,
+    which is what the intersection test needs to stay honest.
+    """
+
     count = len(points) if closed else len(points) - 1
     if count <= 0:
+        return []
+
+    if len(points) <= max_segments:
+        # Nothing to gain: keep the geometry exact.
+        kept = list(range(len(points)))
+    else:
+        kept = _simplify_indices(points, closed, tolerance)
+        if len(kept) > max_segments:
+            stride = int(math.ceil(len(kept) / float(max_segments)))
+            kept = kept[::stride]
+
+    pairs = list(zip(kept, kept[1:]))
+    if closed:
+        pairs.append((kept[-1], kept[0]))
+
+    chords: list[tuple[Vec3, Vec3, float]] = []
+    n = len(points)
+    for i, j in pairs:
+        a = points[i]
+        b = points[j]
+        if j == i + 1 or (closed and i == n - 1 and j == 0):
+            chords.append((a, b, 0.0))
+        else:
+            chords.append((a, b, _chain_error(points, i, j, a, b)))
+    return chords
+
+
+def _contours_of(layer: LayerGeometry) -> Iterable[tuple[int, str, str, list]]:
+    """Yield ``(index, slice_id, frame_id, contours)`` for the geometry to use.
+
+    A processed layer contributes its **result** curves; the source slices are
+    kept only as a fallback so contacts work before (or without) processing.
+    """
+
+    result = getattr(layer, "result", None)
+    if result is not None:
+        for index, slice_result in enumerate(result.slices):
+            yield (
+                index,
+                slice_result.slice_id,
+                slice_result.frame_id or "",
+                [(c.id, c.points, c.closed) for c in slice_result.contours],
+            )
         return
-    step = max(1, count // MAX_SEGMENTS_PER_CONTOUR)
-    for i in range(0, count, step):
-        yield points[i], points[(i + 1) % len(points)]
+    for index, slice_ in enumerate(layer.slices):
+        yield (
+            index,
+            slice_.id,
+            slice_.frame_id or "",
+            [(c.id, c.points, c.closed) for c in slice_.contours],
+        )
 
 
-def _world_points(slice_: Slice, frame: CoordinateFrame) -> list[tuple[str, list[Vec3], bool]]:
-    out: list[tuple[str, list[Vec3], bool]] = []
-    for contour in slice_.contours:
-        if len(contour.points) < 2:
+def _world_contours(contours, frame: CoordinateFrame) -> list[tuple[str, list[Vec3], bool, list]]:
+    out: list[tuple[str, list[Vec3], bool, list]] = []
+    for contour_id, points, closed in contours:
+        if len(points) < 2:
             continue
-        out.append((contour.id, [frame.to_3d(p) for p in contour.points], contour.closed))
+        world = [frame.to_3d(p) for p in points]
+        out.append((contour_id, world, bool(closed), _chords(world, bool(closed))))
     return out
 
 
@@ -148,30 +289,32 @@ def _bounds_overlap(a: tuple[Vec3, Vec3], b: tuple[Vec3, Vec3], gap: float) -> b
 
 
 def _pair_contacts(
-    pts_a: list[Vec3],
-    closed_a: bool,
-    pts_b: list[Vec3],
-    closed_b: bool,
+    chords_a: list[tuple[Vec3, Vec3, float]],
+    chords_b: list[tuple[Vec3, Vec3, float]],
     gap_mm: float,
     merge_mm: float,
     max_per_pair: int,
 ) -> list[tuple[float, Vec3, Vec3]]:
     """All intersections of two contours, or the closest pair if they miss."""
 
-    candidates: list[tuple[float, Vec3, Vec3]] = []
-    for a1, a2 in _segments(pts_a, closed_a):
-        for b1, b2 in _segments(pts_b, closed_b):
+    candidates: list[tuple[float, Vec3, Vec3, bool]] = []
+    for a1, a2, error_a in chords_a:
+        for b1, b2, error_b in chords_b:
             distance, point_a, point_b = _closest_on_segments(a1, a2, b1, b2)
             if distance <= gap_mm + 1e-12:
-                candidates.append((distance, point_a, point_b))
+                # A thinned chord stands for a stretch of the real curve, so two
+                # contours that touch can still measure a few microns apart:
+                # the chord error is the honest tolerance of "these lines cross".
+                crosses = distance <= max(INTERSECTION_EPS_MM, error_a + error_b)
+                candidates.append((distance, point_a, point_b, crosses))
     if not candidates:
         return []
 
-    intersections = [c for c in candidates if c[0] <= INTERSECTION_EPS_MM]
+    intersections = [c for c in candidates if c[3]]
     chosen = intersections if intersections else [min(candidates, key=lambda c: c[0])]
     chosen.sort(key=lambda c: c[0])
 
-    kept: list[tuple[Vec3, tuple[float, Vec3, Vec3]]] = []
+    kept: list[tuple[Vec3, tuple[float, Vec3, Vec3, bool]]] = []
     for candidate in chosen:
         position = v3_lerp(candidate[1], candidate[2], 0.5)
         if any(v3_dist(position, other) < merge_mm for other, _c in kept):
@@ -180,6 +323,22 @@ def _pair_contacts(
         if len(kept) >= max_per_pair:
             break
     return [candidate for _position, candidate in kept]
+
+
+def _prepare_slices(layer: LayerGeometry) -> list[tuple[int, str, list, tuple[Vec3, Vec3]]]:
+    """Lift every drawable slice of a layer to 3D once, ready for the search."""
+
+    prepared: list[tuple[int, str, list, tuple[Vec3, Vec3]]] = []
+    for index, slice_id, frame_id, contours in _contours_of(layer):
+        frame = layer.frames.get(frame_id)
+        if frame is None:
+            continue
+        world = _world_contours(contours, frame)
+        if not world:
+            continue
+        bounds = _slice_bounds([p for _cid, pts, _closed, _chords_list in world for p in pts])
+        prepared.append((index, slice_id, world, bounds))
+    return prepared
 
 
 def _contacts_between_layers(
@@ -191,39 +350,30 @@ def _contacts_between_layers(
     merge_mm: float = 0.25,
     max_per_pair: int = 64,
 ) -> list[ContactPoint]:
+    prepared_a = _prepare_slices(layer_a)
+    if not prepared_a:
+        return []
+    prepared_b = prepared_a if same_layer else _prepare_slices(layer_b)
+    if not prepared_b:
+        return []
+
     contacts: list[ContactPoint] = []
-    for index_a, slice_a in enumerate(layer_a.slices):
-        frame_a = layer_a.frames.get(slice_a.frame_id or "")
-        if frame_a is None:
-            continue
-        contours_a = _world_points(slice_a, frame_a)
-        if not contours_a:
-            continue
-        bounds_a = _slice_bounds([p for _cid, pts, _cl in contours_a for p in pts])
-        for index_b, slice_b in enumerate(layer_b.slices):
+    for index_a, slice_id_a, contours_a, bounds_a in prepared_a:
+        for index_b, slice_id_b, contours_b, bounds_b in prepared_b:
             if same_layer and index_b <= index_a:
-                # Same pass: a slice must not be compared with itself and each
-                # unordered pair is visited once.
+                # A slice must not be compared with itself and each unordered
+                # pair is visited once.
                 continue
-            frame_b = layer_b.frames.get(slice_b.frame_id or "")
-            if frame_b is None:
-                continue
-            contours_b = _world_points(slice_b, frame_b)
-            if not contours_b:
-                continue
-            bounds_b = _slice_bounds([p for _cid, pts, _cl in contours_b for p in pts])
             if not _bounds_overlap(bounds_a, bounds_b, gap_mm):
                 continue
-            for cid_a, pts_a, closed_a in contours_a:
+            for cid_a, pts_a, closed_a, chords_a in contours_a:
                 bounds_pair_a = _slice_bounds(pts_a)
-                for cid_b, pts_b, closed_b in contours_b:
+                for cid_b, pts_b, closed_b, chords_b in contours_b:
                     if not _bounds_overlap(bounds_pair_a, _slice_bounds(pts_b), gap_mm):
                         continue
-                    for distance, point_a, point_b in _pair_contacts(
-                        pts_a,
-                        closed_a,
-                        pts_b,
-                        closed_b,
+                    for distance, point_a, point_b, crosses in _pair_contacts(
+                        chords_a,
+                        chords_b,
                         gap_mm,
                         merge_mm,
                         max_per_pair,
@@ -231,20 +381,16 @@ def _contacts_between_layers(
                         contacts.append(
                             ContactPoint(
                                 layer_a=layer_a.id,
-                                slice_a=slice_a.id,
+                                slice_a=slice_id_a,
                                 contour_a=cid_a,
                                 layer_b=layer_b.id,
-                                slice_b=slice_b.id,
+                                slice_b=slice_id_b,
                                 contour_b=cid_b,
                                 point_a=point_a,
                                 point_b=point_b,
                                 position=v3_lerp(point_a, point_b, 0.5),
                                 distance_mm=distance,
-                                kind=(
-                                    "intersection"
-                                    if distance <= INTERSECTION_EPS_MM
-                                    else "near"
-                                ),
+                                kind="intersection" if crosses else "near",
                             )
                         )
     return contacts
@@ -265,7 +411,7 @@ def find_contacts(
     may contribute.
     """
 
-    layers = [layer for layer in layers if layer.slices]
+    layers = [layer for layer in layers if layer.slices or getattr(layer, "result", None)]
     if len(layers) < 2 and not include_same_layer:
         return []
 

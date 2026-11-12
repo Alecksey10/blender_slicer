@@ -45,6 +45,9 @@ class Section:
     title: str
     fields: tuple[Field, ...]
     open: bool = False
+    #: Sections sharing a group are rendered inside one collapsible panel, so a
+    #: host shows the primary controls and hides the alternatives behind it.
+    group: str = ""
 
 
 @dataclass(frozen=True)

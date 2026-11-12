@@ -38,15 +38,26 @@ class SLICER_OT_generate(bpy.types.Operator):
         return {"FINISHED"}
 
 
+def _wants_background(settings) -> bool:
+    return bool(getattr(settings, "use_background", True))
+
+
 class SLICER_OT_process(bpy.types.Operator):
     bl_idname = "slicer.process"
     bl_label = "Process Slices"
-    bl_description = "Run the configured pipeline on the generated slices"
+    bl_description = (
+        "Run the configured pipeline on the generated slices "
+        "(in a background thread when enabled)"
+    )
     bl_options = {"REGISTER", "UNDO"}
 
     def execute(self, context):
+        settings = _settings(context)
         try:
-            result = adapter.process_current(context, _settings(context))
+            if _wants_background(settings) and adapter.start_process(context, settings):
+                self.report({"INFO"}, "Processing started; use Cancel to stop it")
+                return {"FINISHED"}
+            result = adapter.process_current(context, settings)
         except (SlicerError, ValueError) as exc:
             return _fail(self, exc)
         if result.status == ResultStatus.ERROR:
@@ -63,14 +74,37 @@ class SLICER_OT_run(bpy.types.Operator):
     bl_options = {"REGISTER", "UNDO"}
 
     def execute(self, context):
+        settings = _settings(context)
         try:
-            result = adapter.run(context, _settings(context))
+            if _wants_background(settings) and adapter.start_run(
+                context, settings, regenerate=True
+            ):
+                self.report({"INFO"}, "Working in the background; use Cancel to stop it")
+                return {"FINISHED"}
+            result = adapter.run(context, settings)
         except (SlicerError, ValueError) as exc:
             return _fail(self, exc)
+        if result is None:
+            return {"FINISHED"}
         if result.status == ResultStatus.ERROR:
             self.report({"WARNING"}, "Processing failed; see the report")
         else:
             self.report({"INFO"}, f"Processing finished: {result.status.value}")
+        return {"FINISHED"}
+
+
+class SLICER_OT_cancel(bpy.types.Operator):
+    bl_idname = "slicer.cancel"
+    bl_label = "Cancel"
+    bl_description = "Stop the background job; the previous result is kept"
+    bl_options = {"REGISTER"}
+
+    def execute(self, context):
+        settings = _settings(context)
+        if not adapter.cancel_process(context, settings):
+            self.report({"INFO"}, "Nothing is running")
+            return {"CANCELLED"}
+        self.report({"INFO"}, "Cancelling...")
         return {"FINISHED"}
 
 
@@ -255,6 +289,7 @@ CLASSES = (
     SLICER_OT_generate,
     SLICER_OT_process,
     SLICER_OT_run,
+    SLICER_OT_cancel,
     SLICER_OT_clear,
     SLICER_OT_show_report,
     SLICER_OT_export_settings,

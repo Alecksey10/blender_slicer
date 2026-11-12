@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import math
+import time
 from collections import defaultdict
+from typing import Callable
 
 import bpy
 from mathutils import Vector
 
-from ...protocol.errors import ConfigError
+from ...protocol.errors import Cancelled, ConfigError
 from ...spatial.frames import CoordinateFrame, make_frame
 from ...protocol.types import Contour, ContourRole, Slice
 from ...adapters.base.plan import SlicePlan
@@ -244,18 +246,44 @@ def _plan(
     return planes
 
 
-def generate_slices(
-    context, settings, plan: SlicePlan | None = None
-) -> tuple[list[Slice], dict[str, CoordinateFrame]]:
-    obj = settings.source_object
-    if obj is None or obj.type != "MESH":
+def collect_geometry(
+    context, obj
+) -> tuple[list[tuple[float, float, float]], list[tuple[int, int, int]]]:
+    """Read the evaluated mesh once, in world space, as plain Python data.
+
+    This is the only step that needs ``bpy``, so it runs in the UI thread; the
+    result is plain floats and ints that :func:`build_slices` can take to a
+    worker thread.  Copying the mesh is cheap next to intersecting it with a
+    hundred planes, which is what used to freeze the interface.
+    """
+
+    if obj is None or getattr(obj, "type", "") != "MESH":
         raise ConfigError("Select a mesh object as the slice source")
-    plan = plan or SlicePlan.from_settings(settings)
+    verts, tris = world_triangles(context, obj)
+    return [(v.x, v.y, v.z) for v in verts], [tuple(t) for t in tris]
+
+
+def build_slices(
+    verts_xyz: list[tuple[float, float, float]],
+    tris: list[tuple[int, int, int]],
+    plan: SlicePlan,
+    progress: Callable[[int, int], None] | None = None,
+    cancel: Callable[[], bool] | None = None,
+) -> tuple[list[Slice], dict[str, CoordinateFrame]]:
+    """Intersect a plain triangle soup with the slice planes.
+
+    Touches no Blender state, so a host may run it in a worker thread.  ``plan``
+    is a frozen dataclass, ``progress(done, total)`` is called after each plane
+    and ``cancel`` may raise :class:`Cancelled` between planes.
+    """
+
     scale = float(plan.unit_scale_mm)
     if scale <= 0:
         raise ConfigError("Unit scale must be positive")
+    if not verts_xyz or not tris:
+        raise ConfigError("Source mesh has no triangles")
 
-    verts, tris = world_triangles(context, obj)
+    verts = [Vector(point) for point in verts_xyz]
     center = bbox_center(verts) + Vector(plan.origin_offset_mm) / scale
     axis = axis_vector(plan.axis).normalized()
     projections = [v.dot(axis) for v in verts]
@@ -267,7 +295,10 @@ def generate_slices(
 
     slices: list[Slice] = []
     frames: dict[str, CoordinateFrame] = {}
-    for index, origin, normal, u_hint, metadata in planes:
+    total = len(planes)
+    for done, (index, origin, normal, u_hint, metadata) in enumerate(planes):
+        if cancel is not None and cancel():
+            raise Cancelled()
         frame_id = f"f{index:03d}"
         frame = make_frame(
             (normal.x, normal.y, normal.z),
@@ -304,4 +335,18 @@ def generate_slices(
                 offset_mm=cut_offset_mm,
             )
         )
+        if progress is not None:
+            progress(done + 1, total)
+        # Hand the interpreter back so the UI can repaint between planes.
+        time.sleep(0)
     return slices, frames
+
+
+def generate_slices(
+    context, settings, plan: SlicePlan | None = None
+) -> tuple[list[Slice], dict[str, CoordinateFrame]]:
+    """Blocking generate: collect in the UI thread, then slice right there."""
+
+    plan = plan or SlicePlan.from_settings(settings)
+    verts, tris = collect_geometry(context, settings.source_object)
+    return build_slices(verts, tris, plan)

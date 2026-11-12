@@ -6,7 +6,7 @@ from ...adapters.base.plan import SlicePlan
 from ...spatial.contacts import ContactPoint
 from ...spatial.frames import CoordinateFrame
 from ...protocol.shapes import Slice
-from . import slicing, visualization
+from . import jobs, slicing, visualization
 
 
 class BlenderHost:
@@ -34,7 +34,32 @@ class BlenderHost:
             # must survive this call.
             visualization.clear_layers(self.context)
             return
+        layers = list(layers)
+        if self._queue_draw(layers):
+            return
         visualization.build_layers(self.context, layers, self.settings)
+
+    def _queue_draw(self, layers) -> bool:
+        """Draw in timer steps when the host can pump; ``False`` otherwise.
+
+        Every path that shows curves goes through here - Generate, a
+        synchronous Process, a layer toggle - because a single blocking build
+        is what freezes Blender on a deep model, not just the background job.
+        """
+
+        if jobs.CHUNKS.active:
+            # A newer request supersedes the half-built one.
+            jobs.CHUNKS.cancel()
+        builder = visualization.LayerBuilder(self.context, layers, self.settings)
+        return jobs.start_chunked(
+            builder.step,
+            message=lambda: (
+                f"{jobs.BUILD_MESSAGE} {builder.drawn}/{builder.total}"
+                if builder.total > 20000
+                else jobs.BUILD_MESSAGE
+            ),
+            progress=lambda: builder.progress,
+        )
 
     def show_contacts(self, contacts: list[ContactPoint]) -> None:
         # Contacts used to be drawn only when result curves were enabled, which

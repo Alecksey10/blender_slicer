@@ -98,6 +98,23 @@ class AppController:
     # ------------------------------------------------------------------ slices
     def generate(self, plan: SlicePlan, revision: int = 0) -> SliceLayer:
         slices, frames = self.host.slice_mesh(plan)
+        layer = self.adopt_layer(plan, slices, frames, revision)
+        self.host.show_layers(self.store.visible_layers())
+        return layer
+
+    def adopt_layer(
+        self,
+        plan: SlicePlan,
+        slices,
+        frames,
+        revision: int = 0,
+    ) -> SliceLayer:
+        """Register slices a host produced itself (for example in a worker).
+
+        Same bookkeeping as :meth:`generate` without touching the host: a host
+        that sliced off the main thread applies the visuals in its own steps.
+        """
+
         for index, slice_ in enumerate(slices):
             # The adapter owns the distribution; the engine only applies it.
             slice_.metadata["shrink_ratio"] = plan.shrink_ratio_for(index, len(slices))
@@ -112,7 +129,6 @@ class AppController:
             revision=revision,
         )
         self.store.put(layer)
-        self.host.show_layers(self.store.visible_layers())
         self.events.publish(TOPIC_SLICES_GENERATED, layer=layer, slices=layer.slices, frames=layer.frames)
         return layer
 
@@ -120,6 +136,24 @@ class AppController:
     def process(self, request: ProcessingRequest, layer: SliceLayer | None = None) -> ProcessSummary:
         self.events.publish(TOPIC_PROCESS_STARTED, request=request, layer=layer)
         result = self.client.process(request)
+        return self.apply_result(result, layer)
+
+    def apply_result(
+        self,
+        result: ProcessingResult,
+        layer: SliceLayer | None = None,
+        *,
+        visuals: bool = True,
+    ) -> ProcessSummary:
+        """Publish a finished result and redraw the host viewport.
+
+        Split out of :meth:`process` so a host can run the engine in a worker
+        thread and apply the result on its own UI thread: only this half
+        touches the host (curves, events), the engine call never does.
+        ``visuals=False`` leaves the (possibly expensive) drawing to the caller,
+        which can then do it in small steps.
+        """
+
         if layer is not None:
             layer.result = result
         summary = summarize(result)
@@ -128,7 +162,8 @@ class AppController:
             if result.status == ResultStatus.ERROR
             else TOPIC_PROCESS_COMPLETED
         )
-        self.host.show_layers(self.store.visible_layers())
+        if visuals:
+            self.host.show_layers(self.store.visible_layers())
         self.events.publish(topic, result=result, layer=layer, summary=summary)
         return summary
 
@@ -145,17 +180,20 @@ class AppController:
         return contacts
 
     # ----------------------------------------------------------------- layers
-    def set_layer_visible(self, layer_id: str, visible: bool | None = None) -> bool:
+    def set_layer_visible(
+        self, layer_id: str, visible: bool | None = None, *, visuals: bool = True
+    ) -> bool:
         layer = self.store.get(layer_id)
         if layer is None:
             return False
         layer.visible = (not layer.visible) if visible is None else bool(visible)
-        self.host.show_layers(self.store.visible_layers())
+        if visuals:
+            self.host.show_layers(self.store.visible_layers())
         return layer.visible
 
-    def remove_layer(self, layer_id: str) -> bool:
+    def remove_layer(self, layer_id: str, *, visuals: bool = True) -> bool:
         removed = self.store.remove(layer_id)
-        if removed:
+        if removed and visuals:
             self.host.show_layers(self.store.visible_layers())
         return removed
 

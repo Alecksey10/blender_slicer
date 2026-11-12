@@ -16,10 +16,14 @@ from __future__ import annotations
 import os
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
+from typing import TYPE_CHECKING
 
 from ..protocol.operations import FailurePolicy
 from ..protocol.request import ProcessingRequest
 from ..protocol.result import EngineInfo, ProcessingResult, ResultMetrics, ResultStatus
+
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    from .progress import ProgressReporter
 
 MAX_AUTO_WORKERS = 8
 
@@ -85,7 +89,12 @@ def merge_results(
     )
 
 
-def process_parallel(engine, request: ProcessingRequest, workers: int | None = None) -> ProcessingResult:
+def process_parallel(
+    engine,
+    request: ProcessingRequest,
+    workers: int | None = None,
+    reporter: "ProgressReporter | None" = None,
+) -> ProcessingResult:
     """Run ``engine.process`` over slices in a thread pool and merge the results."""
 
     worker_count = resolve_workers(workers)
@@ -95,17 +104,23 @@ def process_parallel(engine, request: ProcessingRequest, workers: int | None = N
         or len(slices) <= 1
         or request.failure_policy == FailurePolicy.STRICT
     ):
-        return engine.process(request)
+        return engine.process(request, reporter)
 
     # Validate once so an invalid envelope is not reported once per chunk.
     if not engine.validate(request).ok:
-        return engine.process(request)
+        return engine.process(request, reporter)
 
     chunks = split_request(request, worker_count)
     if len(chunks) <= 1:
-        return engine.process(request)
+        return engine.process(request, reporter)
+    if reporter is not None:
+        # Every chunk must report against the whole request, not its own size.
+        reporter = reporter.derive(slices_total=len(slices))
     with ThreadPoolExecutor(
         max_workers=min(worker_count, len(chunks)), thread_name_prefix="slicer"
     ) as pool:
-        parts = list(pool.map(engine.process, chunks))
+        # A Cancelled raised inside a worker propagates out of list(); the pool
+        # is shut down by the context manager, so the host thread returns to
+        # its UI loop immediately.
+        parts = list(pool.map(lambda chunk: engine.process(chunk, reporter), chunks))
     return merge_results(parts, request)

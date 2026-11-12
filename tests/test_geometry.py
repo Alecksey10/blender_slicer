@@ -9,6 +9,7 @@ import unittest
 from blender_slicer.protocol.errors import DomainError
 from blender_slicer.protocol.types import ErrorCode
 from blender_slicer.protocol.geometry import (
+    approximate_smooth_curve,
     bend_allowance_mm,
     chaikin,
     collapse_collinear,
@@ -25,6 +26,7 @@ from blender_slicer.protocol.geometry import (
     point_in_polygon,
     point_to_polyline_distance,
     polyline_length,
+    polyline_max_deviation,
     resample,
     _segments_strictly_intersect,
     sharp_corners,
@@ -494,6 +496,77 @@ class CutThinSectionsTests(unittest.TestCase):
         # Nothing removed because ratio limit prevents it.
         self.assertEqual(len(result), len(pts))
         self.assertTrue(any("limit" in w["message"] or "kept unchanged" in w["message"] for w in warnings))
+
+
+class BezierApproxTests(unittest.TestCase):
+    """Tests for the differentiable Bezier-spline approximation."""
+
+    SPLINE = [(0.0, 0.0), (4.0, 0.0), (8.0, 2.0), (8.0, 8.0), (0.0, 8.0)]
+
+    def test_interpolate_passes_through_anchors(self):
+        out = approximate_smooth_curve(self.SPLINE, False, mode="interpolate", tension=0.5)
+        for p in self.SPLINE:
+            self.assertTrue(_has_point(out, p, 1e-6), f"anchor {p} missed")
+
+    def test_interpolate_open_endpoints_kept(self):
+        line = [(0.0, 0.0), (5.0, 1.0), (10.0, 0.0)]
+        out = approximate_smooth_curve(line, False, mode="interpolate")
+        self.assertEqual(out[0], line[0])
+        self.assertEqual(out[-1], line[-1])
+
+    def test_approximate_stays_within_deviation(self):
+        out = approximate_smooth_curve(self.SPLINE, False, mode="approximate", max_deviation_mm=0.1)
+        dev = polyline_max_deviation(out, self.SPLINE, False)
+        self.assertLessEqual(dev, 0.1 + 1e-6, dev)
+
+    def test_approximate_reduces_dense_input(self):
+        dense = [(i * 0.5, 0.0) for i in range(41)] + [(20.0, 10.0)]
+        out = approximate_smooth_curve(dense, False, mode="approximate", max_deviation_mm=0.5)
+        self.assertLess(len(out), len(dense))
+
+    def test_tension_zero_gives_straight_chords(self):
+        out = approximate_smooth_curve(self.SPLINE, False, mode="interpolate", tension=0.0)
+        # With zero tension the spline collapses to the chords between anchors:
+        # every consecutive pair of anchors appears as a straight sub-chain.
+        flat = True
+        for a, b in zip(self.SPLINE, self.SPLINE[1:]):
+            if not any(dist(p, a) < 1e-6 and dist(q, b) < 1e-6 for p, q in zip(out, out[1:])):
+                flat = False
+        self.assertTrue(flat)
+
+    def test_corners_preserved_exactly(self):
+        out = approximate_smooth_curve(SQUARE, True, mode="interpolate", preserve_corners_deg=70.0)
+        for p in SQUARE:
+            self.assertTrue(_has_point(out, p, 1e-6), f"corner {p} rounded away")
+
+    def test_adaptive_detail_more_points_on_curves(self):
+        straight = [(0.0, 0.0), (10.0, 0.0), (20.0, 0.0)]
+        curved = [(0.0, 0.0), (5.0, 0.0), (10.0, 2.0), (15.0, 0.0), (20.0, 0.0)]
+        n_straight = len(approximate_smooth_curve(straight, False, chord_tolerance_mm=0.05))
+        n_curved = len(approximate_smooth_curve(curved, False, chord_tolerance_mm=0.05))
+        self.assertGreaterEqual(n_curved, n_straight)
+
+    def test_closed_smooth_loop_stays_closed(self):
+        circle = [
+            (50.0 * math.cos(2 * math.pi * i / 32), 50.0 * math.sin(2 * math.pi * i / 32))
+            for i in range(32)
+        ]
+        out = approximate_smooth_curve(circle, True, mode="interpolate", tension=0.5)
+        self.assertGreater(len(out), len(circle))
+        area_out = abs(signed_area(out))
+        area_ref = abs(signed_area(circle))
+        self.assertLessEqual(abs(area_out - area_ref), area_ref * 0.02)
+
+    def test_backward_compatible_positional_call(self):
+        # Old positional signature (points, closed, radius, samples, tension,
+        # inertia) must still be accepted and produce geometry.
+        out = approximate_smooth_curve(SQUARE, True, 6.0, 16, 0.4, 2)
+        self.assertGreater(len(out), 0)
+        # With zero inertia and no radius clamp the spline passes exactly
+        # through the anchors.
+        out = approximate_smooth_curve(SQUARE, True, 0.0, 16, 0.4, 0)
+        for p in SQUARE:
+            self.assertTrue(_has_point(out, p, 1e-6), f"anchor {p} missed")
 
 
 if __name__ == "__main__":

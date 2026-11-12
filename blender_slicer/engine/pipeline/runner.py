@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from ...protocol.diagnostics import Diagnostic, ErrorCode, Severity, diagnostic
 from ...protocol.errors import DomainError
 from ...protocol.geometry import (
@@ -28,6 +30,9 @@ from . import policies
 from .selection import select_contours
 from .state import SliceState
 
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    from ..progress import ProgressReporter
+
 
 class SliceRunner:
     """Runs the configured operation list over one slice.
@@ -39,7 +44,12 @@ class SliceRunner:
     def __init__(self, registry: MethodRegistry) -> None:
         self.registry = registry
 
-    def run(self, slice_: Slice, request: ProcessingRequest) -> tuple[SliceResult, bool, bool]:
+    def run(
+        self,
+        slice_: Slice,
+        request: ProcessingRequest,
+        reporter: "ProgressReporter | None" = None,
+    ) -> tuple[SliceResult, bool, bool]:
         original = slice_.clone()
         diagnostics: list[Diagnostic] = []
         try:
@@ -55,6 +65,8 @@ class SliceRunner:
         for op in request.operations:
             if not op.enabled:
                 continue
+            if reporter is not None:
+                reporter.check()
             method = self.registry.get(op.method)
             if method is None:
                 # Request validation should have caught this before the run.
@@ -93,6 +105,9 @@ class SliceRunner:
                         contour_id=contour.id,
                         slice_offset_mm=state.offset_mm,
                         slice_metadata=dict(state.slice.metadata),
+                        progress=reporter,
+                        slice_index=state.index,
+                        slices_total=reporter.slices_total if reporter is not None else 0,
                     )
                     state.replace(method.apply_contour(contour, params, context))
                 diagnostics.extend(stage_diagnostics)

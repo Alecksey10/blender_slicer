@@ -29,8 +29,12 @@ class EngineClient:
     def parallel(self) -> bool:
         return self.worker_count > 1
 
-    def process(self, request) -> ProcessingResult:
-        return self.engine.process_parallel(request, workers=self.workers)
+    def process(self, request, reporter=None) -> ProcessingResult:
+        """Process a request; ``reporter`` gives the host progress and cancel."""
+
+        return self.engine.process_parallel(
+            request, workers=self.workers, reporter=reporter
+        )
 
     def validate(self, request):
         return self.engine.validate(request)

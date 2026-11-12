@@ -238,26 +238,101 @@ class SlicerSettings(bpy.types.PropertyGroup):
         update=_mark_dirty,
     )
 
-    # ----------------------------------------------------------------- smooth
-    smooth_enabled: bpy.props.BoolProperty(name="Smooth", default=True, update=_mark_dirty)
-    smooth_algorithm: bpy.props.EnumProperty(
-        name="Algorithm",
-        items=(("chaikin", "Chaikin", "Corner cutting"), ("laplacian", "Laplacian", "Constrained relaxation")),
-        default="chaikin",
+    # ------------------------------------------------- smooth curve approx
+    smooth_curve_enabled: bpy.props.BoolProperty(
+        name="Smooth curve approx", default=True, update=_mark_dirty
+    )
+    smooth_curve_mode: bpy.props.EnumProperty(
+        name="Fit mode",
+        items=(
+            ("interpolate", "Interpolate", "Passes exactly through every point (corners kept)"),
+            ("approximate", "Approximate", "Simplifies first, deviation bounded by max deviation"),
+            ("hybrid", "Hybrid", "Light inertia blur, then interpolate"),
+        ),
+        default="approximate",
         update=_mark_dirty,
     )
-    smooth_iterations: bpy.props.IntProperty(
-        name="Iterations", default=1, min=0, max=20, step=1, update=_mark_dirty
-    )
-    smooth_preserve_corners_deg: bpy.props.FloatProperty(
-        name="Preserve corners", default=70.0, min=0.0, max=180.0, step=1.0,
+    smooth_curve_tension: bpy.props.FloatProperty(
+        name="Curve tension",
+        description="0.0 = straight chords; 1.0 = tight Catmull-Rom curves",
+        default=0.4,
+        min=0.0,
+        max=1.0,
+        step=0.05,
         update=_mark_dirty,
     )
-    smooth_max_deviation_mm: bpy.props.FloatProperty(
-        name="Max deviation", default=0.2, min=0.0, step=0.01, update=_mark_dirty
+    smooth_curve_max_deviation_mm: bpy.props.FloatProperty(
+        name="Max deviation (mm)",
+        description="0 = exact fit; otherwise output stays within this of the source",
+        default=0.2,
+        min=0.0,
+        step=0.01,
+        update=_mark_dirty,
     )
-    smooth_weight: bpy.props.FloatProperty(
-        name="Weight", default=0.5, min=0.0, max=1.0, step=0.05, update=_mark_dirty
+    smooth_curve_chord_tolerance_mm: bpy.props.FloatProperty(
+        name="Chord tolerance (mm)",
+        description="Adaptive detail: smaller = more samples on tight curves, fewer on flat spans. 0 = uniform segments_per_span",
+        default=0.05,
+        min=0.0,
+        step=0.01,
+        update=_mark_dirty,
+    )
+    smooth_curve_max_spacing_mm: bpy.props.FloatProperty(
+        name="Max spacing (mm)",
+        description="0 disables",
+        default=0.0,
+        min=0.0,
+        step=0.1,
+        update=_mark_dirty,
+    )
+    smooth_curve_segments_per_span: bpy.props.IntProperty(
+        name="Segments per span",
+        description="Uniform samples per span when chord tolerance is 0",
+        default=8,
+        min=2,
+        max=64,
+        step=1,
+        update=_mark_dirty,
+    )
+    smooth_curve_preserve_corners_deg: bpy.props.FloatProperty(
+        name="Preserve corners (deg)",
+        description="Turns sharper than this stay exact corners; spline is split there",
+        default=0.0,
+        min=0.0,
+        max=180.0,
+        step=1.0,
+        update=_mark_dirty,
+    )
+    smooth_curve_inertia_smoothing: bpy.props.IntProperty(
+        name="Inertia passes",
+        description="Optional pre-blur; 0 keeps sharp features",
+        default=0,
+        min=0,
+        max=10,
+        step=1,
+        update=_mark_dirty,
+    )
+    smooth_curve_inertia: bpy.props.FloatProperty(
+        name="Overall inertia",
+        description=(
+            "0.0 = exact following of every point; 1.0 = degenerates into a "
+            "best-fit circle; intermediate values blend progressively"
+        ),
+        default=0.0,
+        min=0.0,
+        max=1.0,
+        step=0.05,
+        update=_mark_dirty,
+    )
+    smooth_curve_use_material_min_radius: bpy.props.BoolProperty(
+        name="Use material min bend radius", default=False, update=_mark_dirty
+    )
+    smooth_curve_min_radius_mm: bpy.props.FloatProperty(
+        name="Min radius (mm)",
+        default=0.0,
+        min=0.0,
+        step=0.1,
+        update=_mark_dirty,
     )
 
     # ---------------------------------------------------------------- simplify
@@ -316,6 +391,86 @@ class SlicerSettings(bpy.types.PropertyGroup):
     )
     limit_curvature_strict: bpy.props.BoolProperty(
         name="Fail if not converged", default=False, update=_mark_dirty
+    )
+
+    # ------------------------------------------------------------- optimizer
+    optimize_enabled: bpy.props.BoolProperty(
+        name="Optimize curve",
+        description=(
+            "Fit the contour with one constrained least-squares solve "
+            "(data + bending energy + bend radius) instead of relying on the "
+            "sequential shaping stages. While it is on, fillet, cut thin, "
+            "trim tight, smoothing and curvature limiting are skipped: they "
+            "would fight the global fit over the same corners."
+        ),
+        default=True,
+        update=_mark_dirty,
+    )
+    optimize_points: bpy.props.IntProperty(
+        name="Curve samples",
+        description="Points the contour is resampled to before the solve",
+        default=150,
+        min=8,
+        max=4000,
+        step=1,
+        update=_mark_dirty,
+    )
+    optimize_data_weight: bpy.props.FloatProperty(
+        name="Data weight",
+        description="Pull towards the measured points; higher keeps detail",
+        default=20.0,
+        min=0.0,
+        soft_max=200.0,
+        step=1.0,
+        update=_mark_dirty,
+    )
+    optimize_smooth: bpy.props.FloatProperty(
+        name="Smooth (length, mm)",
+        description=(
+            "Smoothing length of the 'smooth' term: the scale over which the "
+            "fit may trade data for a straighter curve. 0 follows every "
+            "measured wobble; 5-10 mm irons out noise while keeping corners."
+        ),
+        default=2.0,
+        min=0.0,
+        soft_max=50.0,
+        step=0.5,
+        update=_mark_dirty,
+    )
+    optimize_use_material_min_radius: bpy.props.BoolProperty(
+        name="Use material min bend radius", default=True, update=_mark_dirty
+    )
+    optimize_min_radius_mm: bpy.props.FloatProperty(
+        name="Minimum radius (mm)",
+        default=6.0,
+        min=0.0,
+        step=0.1,
+        update=_mark_dirty,
+    )
+    optimize_radius_weight: bpy.props.FloatProperty(
+        name="Bend radius penalty",
+        description=(
+            "How hard a bend tighter than the minimum radius is punished; "
+            "raise it to buy bendability with deviation"
+        ),
+        default=1000.0,
+        min=0.0,
+        soft_max=10000.0,
+        step=10.0,
+        update=_mark_dirty,
+    )
+    optimize_max_iterations: bpy.props.IntProperty(
+        name="Max iterations", default=40, min=1, max=500, step=1, update=_mark_dirty
+    )
+    optimize_cost_tolerance: bpy.props.FloatProperty(
+        name="Cost tolerance",
+        description="Stop when one step improves the cost by less than this",
+        default=1e-6,
+        min=0.0,
+        soft_max=1e-2,
+        step=1e-7,
+        precision=9,
+        update=_mark_dirty,
     )
 
     # ------------------------------------------------------------ shrink
@@ -437,6 +592,15 @@ class SlicerSettings(bpy.types.PropertyGroup):
         default=True,
         update=_mark_dirty,
     )
+    use_background: bpy.props.BoolProperty(
+        name="Background processing",
+        description=(
+            "Run processing in a worker thread so Blender stays responsive; "
+            "progress is shown in the panel and the job can be cancelled"
+        ),
+        default=True,
+        update=_mark_dirty,
+    )
 
     # ------------------------------------------------------------------ output
     build_curves: bpy.props.BoolProperty(
@@ -448,6 +612,15 @@ class SlicerSettings(bpy.types.PropertyGroup):
     check_self_intersections: bpy.props.BoolProperty(
         name="Check self-intersections", default=True, update=_mark_dirty
     )
+
+    # ------------------------------------------------------------ background job
+    # Written only by the main-thread timer of ``jobs.py``; never editable.
+    job_running: bpy.props.BoolProperty(name="Running", default=False)
+    job_progress: bpy.props.FloatProperty(
+        name="Progress", default=0.0, min=0.0, max=1.0, subtype="PERCENTAGE"
+    )
+    job_message: bpy.props.StringProperty(name="Job", default="")
+    job_cancelling: bpy.props.BoolProperty(name="Cancelling", default=False)
 
     # ------------------------------------------------------------------ status
     status: bpy.props.StringProperty(name="Status", default="Ready")

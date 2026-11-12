@@ -9,7 +9,7 @@ from __future__ import annotations
 bl_info = {
     "name": "Slice Engine",
     "author": "Blender Slicer",
-    "version": (0, 3, 0),
+    "version": (0, 3, 1),
     "blender": (4, 0, 0),
     "location": "View3D > Sidebar > Slice",
     "description": "Slice meshes into bendable 2D contours with cut offsets, contacts and a host-independent engine",

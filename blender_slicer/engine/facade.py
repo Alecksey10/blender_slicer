@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import asdict
+from typing import TYPE_CHECKING
 
 from ..protocol.descriptor import EngineDescriptor, MethodDescriptor
 from ..protocol.diagnostics import Diagnostic, ErrorCode, Severity, ValidationReport, diagnostic
@@ -30,6 +31,9 @@ from .pipeline.runner import SliceRunner
 from .registry import MethodRegistry, validate_params
 from .validation.invariants import contour_invariants
 from .validation.limits import check_envelope, check_limits, check_material
+
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    from .progress import ProgressReporter
 
 PROTOCOL_MAJOR = PROTOCOL_VERSION.split(".")[0]
 
@@ -82,7 +86,10 @@ class Engine:
         return dumps_result(self.process(request))
 
     def process_parallel(
-        self, request: ProcessingRequest, workers: int | None = None
+        self,
+        request: ProcessingRequest,
+        workers: int | None = None,
+        reporter: "ProgressReporter | None" = None,
     ) -> ProcessingResult:
         """Process the request with a thread pool over independent slices.
 
@@ -91,7 +98,7 @@ class Engine:
         """
         from .parallel import process_parallel
 
-        return process_parallel(self, request, workers)
+        return process_parallel(self, request, workers, reporter)
 
     def validate(self, request: ProcessingRequest) -> ValidationReport:
         diagnostics: list[Diagnostic] = []
@@ -148,19 +155,32 @@ class Engine:
         ok = not any(d.severity == Severity.ERROR for d in diagnostics)
         return ValidationReport(ok=ok, diagnostics=diagnostics, counts=counts)
 
-    def process(self, request: ProcessingRequest) -> ProcessingResult:
+    def process(
+        self,
+        request: ProcessingRequest,
+        reporter: "ProgressReporter | None" = None,
+    ) -> ProcessingResult:
         report = self.validate(request)
         engine_info = EngineInfo()
         if not report.ok:
             return self._error_result(request, report.counts, report.diagnostics)
+
+        if reporter is not None and not reporter.slices_total:
+            # A parallel run derives the total before splitting; keep it.
+            reporter = reporter.derive(slices_total=len(request.slices))
 
         results = []
         failed = 0
         partial = False
         points_out = 0
         for slice_ in request.slices:
+            # A cancel must stop before the next slice, not after the batch.
+            if reporter is not None:
+                reporter.check()
             try:
-                result, slice_failed, slice_partial = self.runner.run(slice_, request)
+                result, slice_failed, slice_partial = self.runner.run(
+                    slice_, request, reporter
+                )
             except DomainError as exc:
                 if request.failure_policy == FailurePolicy.STRICT:
                     return self._error_result(

@@ -25,7 +25,7 @@
 Архив для установки собирается из дерева проекта:
 
 ```bash
-python3 tools/build_addon_zip.py          # -> dist/blender_slicer-0.2.1.zip
+python3 tools/build_addon_zip.py          # -> dist/blender_slicer-0.3.1.zip
 ```
 
 ### Автоматически (headless)
@@ -33,7 +33,7 @@ python3 tools/build_addon_zip.py          # -> dist/blender_slicer-0.2.1.zip
 ```bash
 # 1. проверка самого архива — тот же путь, что и «Install from Disk»
 blender --background --factory-startup --python-exit-code 1 \
-    --python tools/blender_smoke.py -- --zip dist/blender_slicer-0.2.1.zip
+    --python tools/blender_smoke.py -- --zip dist/blender_slicer-0.3.1.zip
 
 # 2. проверка рабочего дерева без установки в пользовательский каталог
 blender --background --factory-startup --python-exit-code 1 \
@@ -94,10 +94,28 @@ passed`; при любом провале Blender завершается с ко
    шаг, смещение, центрирование, смещение центра срезов.
 3. **Material** — толщина листа, минимальный радиус гиба, максимальный угол гиба,
    минимальная длина сегмента, керф, K-фактор.
-4. **Операции** — `Fillet corners`, `Smooth`, `Simplify`, `Densify`, `Resample`,
-   `Limit curvature`. Порядок фиксирован:
-   `fillet → smooth → simplify → densify → resample → limit curvature`.
-   Каждая операция включается/выключается галочкой, параметры — в её блоке.
+4. **Операции** — главный блок — раскрытая сверху панель
+   **«Least-squares optimizer»** (метод из блокнота-прототипа):
+   `optimize_enabled`, `Curve samples`, `Data weight`, `Smooth (length, mm)`
+   (параметр `smooth` из блокнота, но выраженный длиной сглаживания:
+   `w_smooth = w_data * (smooth / ds)^4`, `0` выключает член),
+   `Use material min radius`, `Minimum radius`, `Bend radius penalty`,
+   `Max iterations`, `Cost tolerance`, плюс подсказка «Deviation per radian:
+   N мм» = `sqrt(radius_weight / data_weight)`.
+   `Curve samples` — минимум: на крупной детали метод сам поднимает его до
+   `периметр / (R_min / 2)` (не выше 600), чтобы гиб не превращался в фаску;
+   если и этого мало — предупреждение с конкретным рекомендуемым числом.
+   Пока оптимизатор включён (по умолчанию **да**), последовательные эвристики
+   не запускаются — они боролись бы с глобальной подгонкой за одни и те же
+   углы. Пайплайн в этом режиме: `simplify → optimize_curve → densify →
+   resample`.
+   Всё старое сложено в одну закрытую панель **«Legacy shaping»**: `Fillet
+   corners`, `Cut thin sections`, `Trim tight corners`, `Smooth curve approx`,
+   `Limit curvature`. Они включаются галочками только при выключенном
+   оптимизаторе; тогда порядок: `fillet → smooth_curve_approx → simplify →
+   densify → resample → limit curvature`.
+   Общие стадии (`Simplify`, `Densify`, `Resample`) остаются своими панелями и
+   работают в обоих режимах.
 5. **Actions** (вверху панели):
    * `Run` — generate + process одним нажатием;
    * `Generate Slices` — пересечение меша с плоскостями, построение исходных
@@ -108,6 +126,35 @@ passed`; при любом провале Blender завершается с ко
 
 Панель **Report** показывает статус, число срезов/точек, ошибки и предупреждения
 движка; кнопка `Show Report` открывает полный список диагностик.
+
+### Фоновая обработка
+
+`Process Slices` и `Run` считают в отдельном потоке (`Performance → Background
+processing`), поэтому Blender не виснет: в основной панели появляется полоса
+прогресса с текущим этапом и срезом, рядом — кнопка `Cancel`. Отмена доходит до
+движка между срезами и внутри итераций оптимизатора (`MethodContext.
+check_cancel()`). При отмене или ошибке в сцене остаётся предыдущий результат.
+Если у хоста нет `bpy.app.timers`, аддон сам откатывается к синхронному запуску.
+
+В главном потоке не остаётся ничего тяжёлого — это важно, потому что потоки в
+CPython делят GIL и долгая работа в UI-потоке всё равно подвешивает окно:
+
+* **развёртка меша** тоже в рабочем потоке: `slicing.collect_geometry()` в UI-потоке
+  один раз копирует вычисленный меш в обычные `float`/`int` (единственное
+  обращение к `bpy`), а `slicing.build_slices()` пересекает его с плоскостями уже
+  вне `bpy`; прогресс фазы показывается как `slicing · plane 7/20`;
+* **снимок настроек**: `adapter.request_template()` читает RNA в UI-потоке и
+  отдаёт потоку-исполнителю обычный `RequestTemplate`, поэтому рабочий поток
+  никогда не трогает `settings`;
+* **построение кривых** — единственная оставшаяся работа `bpy` — разбито на шаги
+  через `visualization.LayerBuilder` и `jobs.ChunkedRunner`: таймер пишет
+  ограниченное число точек за тик (`building curves 12000/250000` в панели), может
+  остановиться в середине контура и удаляет прошлый результат пачками, а фаска
+  (`bevel_depth`) включается только после заполнения кривой — иначе Blender
+  пересобирал бы её оболочку на каждой перерисовке недорисованного среза;
+* фоновый запуск всегда одно-поточный для движка (`_controller(..., workers=1)`):
+  дополнительные потоки под GIL только мешают UI-потоку, а оптимизатор уступает
+  GIL между итерациями.
 
 Результат складывается в коллекцию `Slice Engine` (по объекту `Slice_NNN` на
 срез), роли контуров раскрашены материалами `SliceCut` / `SliceScore` /
@@ -157,6 +204,7 @@ tests/                 headless-проверки (bpy замокан)
 | `densify` | добавляет точки по шагу/углу/хорде | `max_spacing_mm`, `max_angle_step_deg`, `chord_tolerance_mm` |
 | `resample` | равномерная или адаптивная переразбивка | `spacing_mm`, `adaptive`, `min_spacing_mm`, `chord_tolerance_mm` |
 | `limit_curvature` | сглаживает вершины до минимального радиуса | `use_material_min_radius`, `min_radius_mm`, `max_iterations`, `weight`, `strict` |
+| `optimize_curve` | глобальный МНК: данные + энергия изгиба + штраф за радиус гиба, решается Левенбергом–Марквардтом (без SciPy). В Blender-аддоне включён по умолчанию и заменяет `fillet`/`smooth_curve_approx`/`curvature` | `sample_points`, `data_weight`, `smooth`, `use_material_min_radius`, `min_radius_mm`, `radius_weight`, `max_iterations`, `cost_tolerance` |
 | `bend_check` | проверка линии сгиба и bend allowance | `mode`, `report_allowance` |
 
 Каждый метод описывает себя через `MethodDescriptor`/`ParamSpec`: имя, тип,

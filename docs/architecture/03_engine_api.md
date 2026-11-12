@@ -112,6 +112,7 @@ class Method(Protocol):
 | `fillet_corners` | contour | скругление углов дугой |
 | `densify` | contour | адаптивное добавление точек |
 | `limit_curvature` | contour | итеративное ограничение кривизны |
+| `optimize_curve` | contour | глобальный МНК-фит: данные + энергия изгиба + радиус гиба |
 | `local_recalc` | contour | пересчёт диапазона с якорями |
 | `bend_check` | contour | проверка сгиба и bend allowance |
 | `repair` | slice | дубликаты, замыкание, выбросы (экспериментально) |

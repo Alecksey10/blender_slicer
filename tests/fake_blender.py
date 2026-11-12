@@ -162,6 +162,44 @@ class FakeMeshObject:
         return None
 
 
+class FakeTimers:
+    """Minimal ``bpy.app.timers``: callbacks the test can tick by hand."""
+
+    def __init__(self) -> None:
+        self.functions: list = []
+        self.intervals: dict = {}
+
+    def register(self, function, first_interval: float = 0.0, persistent: bool = False):
+        if function in self.functions:
+            return
+        self.functions.append(function)
+        self.intervals[function] = first_interval
+
+    def unregister(self, function) -> None:
+        if function in self.functions:
+            self.functions.remove(function)
+            self.intervals.pop(function, None)
+
+    def is_registered(self, function) -> bool:
+        return function in self.functions
+
+    def tick(self) -> int:
+        """Run every registered callback once; a ``None`` return unregisters."""
+
+        alive = 0
+        for function in list(self.functions):
+            try:
+                result = function()
+            except Exception:  # noqa: BLE001 - mirrors Blender dropping it
+                self.unregister(function)
+                continue
+            if result is None:
+                self.unregister(function)
+            else:
+                alive += 1
+        return alive
+
+
 class FakeArea:
     def __init__(self) -> None:
         self.redraws = 0
@@ -178,6 +216,182 @@ class FakeContext:
 
     def evaluated_depsgraph_get(self):
         return object()
+
+
+# --------------------------------------------------------------- bpy.data ---
+class FakePoint:
+    def __init__(self) -> None:
+        self.co = (0.0, 0.0, 0.0, 1.0)
+
+
+class FakePoints:
+    def __init__(self) -> None:
+        # A new spline already has one point, as in Blender.
+        self.items: list[FakePoint] = [FakePoint()]
+
+    def add(self, count: int) -> None:
+        self.items.extend(FakePoint() for _ in range(max(0, int(count))))
+
+    def __len__(self) -> int:
+        return len(self.items)
+
+    def __getitem__(self, index: int) -> FakePoint:
+        return self.items[index]
+
+
+class FakeSpline:
+    def __init__(self, kind: str = "POLY") -> None:
+        self.type = kind
+        self.points = FakePoints()
+        self.use_cyclic_u = False
+        self.material_index = 0
+
+
+class FakeSplines:
+    def __init__(self) -> None:
+        self.items: list[FakeSpline] = []
+
+    def new(self, kind: str = "POLY") -> FakeSpline:
+        spline = FakeSpline(kind)
+        self.items.append(spline)
+        return spline
+
+    def __len__(self) -> int:
+        return len(self.items)
+
+    def __iter__(self):
+        return iter(self.items)
+
+
+class FakeCurveData:
+    """``bpy.data.curves`` entry: just enough for ``_new_curve_object``."""
+
+    def __init__(self, name: str, type: str = "CURVE") -> None:
+        self.name = name
+        self.dimensions = "3D"
+        self.resolution_u = 12
+        self.bevel_depth = 0.0
+        self.bevel_resolution = 0
+        self.use_fill_caps = False
+        self.splines = FakeSplines()
+        self.materials: list = []
+        self.users = 1
+
+
+class FakeMaterialData:
+    def __init__(self, name: str) -> None:
+        self.name = name
+        self.diffuse_color = (0.0, 0.0, 0.0, 1.0)
+        self.use_nodes = False
+        self.node_tree = types.SimpleNamespace(nodes=types.SimpleNamespace(get=lambda _n: None))
+        self.users = 1
+
+
+class FakeMeshData:
+    def __init__(self, name: str) -> None:
+        self.name = name
+        self.verts: list = []
+        self.faces: list = []
+        self.materials: list = []
+        self.users = 1
+
+    def from_pydata(self, verts, edges, faces) -> None:
+        self.verts = list(verts)
+        self.faces = list(faces)
+
+    def update(self) -> None:
+        return None
+
+
+class FakeLinked:
+    """``collection.objects`` / ``collection.children``."""
+
+    def __init__(self) -> None:
+        self.items: list = []
+
+    def link(self, item) -> None:
+        self.items.append(item)
+
+    def get(self, name: str):
+        return next((item for item in self.items if item.name == name), None)
+
+    def __iter__(self):
+        return iter(list(self.items))
+
+    def __len__(self) -> int:
+        return len(self.items)
+
+
+class FakeSceneCollection:
+    def __init__(self, name: str = "Scene Collection") -> None:
+        self.name = name
+        self.children = FakeLinked()
+        self.objects = FakeLinked()
+
+
+class FakeCollection(FakeSceneCollection):
+    def __init__(self, name: str = "Collection") -> None:
+        super().__init__(name)
+
+
+class FakeCurveObject:
+    """Object with a curve datablock, as the visualization creates them."""
+
+    type = "CURVE"
+
+    def __init__(self, name: str, data=None) -> None:
+        self.name = name
+        self.data = data
+        self.show_in_front = False
+        self.location = (0.0, 0.0, 0.0)
+        self.dimensions = (0.0, 0.0, 0.0)
+        self._props: dict = {}
+
+    def __setitem__(self, key, value) -> None:
+        self._props[key] = value
+
+    def __getitem__(self, key):
+        return self._props[key]
+
+    def get(self, key, default=None):
+        return self._props.get(key, default)
+
+
+class _Store:
+    """``bpy.data.<something>``: name-keyed store with Blender's surface."""
+
+    def __init__(self, factory) -> None:
+        self._factory = factory
+        self._items: dict = {}
+
+    def get(self, name: str, default=None):
+        return self._items.get(name, default)
+
+    def new(self, name: str, *args, **kwargs):
+        item = self._factory(name, *args, **kwargs)
+        self._items[item.name] = item
+        return item
+
+    def remove(self, item, **kwargs) -> None:
+        self._items.pop(item if isinstance(item, str) else getattr(item, "name", ""), None)
+
+    def __iter__(self):
+        return iter(list(self._items.values()))
+
+    def __len__(self) -> int:
+        return len(self._items)
+
+
+def data_stores() -> types.SimpleNamespace:
+    """Fresh ``bpy.data``; tests reset it to start with an empty blend."""
+
+    return types.SimpleNamespace(
+        collections=_Store(FakeCollection),
+        objects=_Store(FakeCurveObject),
+        curves=_Store(FakeCurveData),
+        materials=_Store(FakeMaterialData),
+        meshes=_Store(FakeMeshData),
+    )
 
 
 def make_settings(**overrides):
@@ -220,12 +434,18 @@ def make_settings(**overrides):
         trim_tight_min_turn_deg=20.0,
         trim_tight_max_removed_ratio=0.5,
         trim_tight_action="trim",
-        smooth_enabled=True,
-        smooth_algorithm="chaikin",
-        smooth_iterations=1,
-        smooth_preserve_corners_deg=70.0,
-        smooth_max_deviation_mm=0.2,
-        smooth_weight=0.5,
+        smooth_curve_enabled=True,
+        smooth_curve_mode="approximate",
+        smooth_curve_tension=0.4,
+        smooth_curve_max_deviation_mm=0.2,
+        smooth_curve_chord_tolerance_mm=0.05,
+        smooth_curve_max_spacing_mm=0.0,
+        smooth_curve_segments_per_span=8,
+        smooth_curve_preserve_corners_deg=0.0,
+        smooth_curve_inertia_smoothing=0,
+        smooth_curve_inertia=0.0,
+        smooth_curve_use_material_min_radius=False,
+        smooth_curve_min_radius_mm=0.0,
         simplify_enabled=True,
         simplify_tolerance_mm=0.05,
         simplify_preserve_corners_deg=70.0,
@@ -244,6 +464,15 @@ def make_settings(**overrides):
         limit_curvature_max_iterations=20,
         limit_curvature_weight=0.5,
         limit_curvature_strict=False,
+        optimize_enabled=False,
+        optimize_points=150,
+        optimize_data_weight=20.0,
+        optimize_smooth=2.0,
+        optimize_use_material_min_radius=True,
+        optimize_min_radius_mm=6.0,
+        optimize_radius_weight=1000.0,
+        optimize_max_iterations=40,
+        optimize_cost_tolerance=1e-6,
         inset_enabled=False,
         inset_x_mode="OUTWARD",
         inset_y_mode="NONE",
@@ -259,7 +488,12 @@ def make_settings(**overrides):
         contact_marker_mm=5.0,
         contacts_include_same=False,
         threads=0,
+        use_background=True,
         show_all_layers=True,
+        job_running=False,
+        job_progress=0.0,
+        job_message="",
+        job_cancelling=False,
         last_contacts=0,
         build_curves=False,
         curve_radius_mm=0.15,
@@ -352,17 +586,12 @@ def install():
     bpy._is_fake = True
     bpy.types = types_ns
     bpy.props = props
-    bpy.app = types.SimpleNamespace(version=(4, 2, 0))
+    bpy.app = types.SimpleNamespace(version=(4, 2, 0), timers=FakeTimers())
     bpy.utils = types.SimpleNamespace(
         register_class=lambda cls: None,
         unregister_class=lambda cls: None,
     )
-    bpy.data = types.SimpleNamespace(
-        collections={},
-        objects={},
-        curves={},
-        materials={},
-    )
+    bpy.data = data_stores()
 
     extras = types.ModuleType("bpy_extras")
     io_utils = types.ModuleType("bpy_extras.io_utils")

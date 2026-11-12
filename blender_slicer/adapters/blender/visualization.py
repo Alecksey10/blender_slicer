@@ -38,17 +38,49 @@ def _remove_collection(coll) -> None:
     bpy.data.collections.remove(coll)
 
 
-def clear_collection(context) -> None:
-    coll = bpy.data.collections.get(COLLECTION_NAME)
-    if coll is None:
-        return
-    _remove_collection(coll)
+def _purge_orphans() -> None:
+    """Drop curve and material datablocks left behind by removed objects."""
+
     for curve in list(bpy.data.curves):
         if curve.users == 0 and curve.name.startswith("Slice_"):
             bpy.data.curves.remove(curve)
     for material in list(bpy.data.materials):
         if material.users == 0 and material.name.startswith("SliceLayer_"):
             bpy.data.materials.remove(material)
+
+
+def clear_collection(context) -> None:
+    coll = bpy.data.collections.get(COLLECTION_NAME)
+    if coll is None:
+        return
+    _remove_collection(coll)
+    _purge_orphans()
+
+
+def _doomed_children() -> tuple[list, list]:
+    """Objects and collections of the previous result, children first.
+
+    Collected up front so a host can remove them a few at a time instead of
+    unlinking a thousand objects inside one timer tick.
+    """
+
+    objects: list = []
+    collections: list = []
+    root = bpy.data.collections.get(COLLECTION_NAME)
+    if root is None:
+        return objects, collections
+
+    def walk(coll) -> None:
+        for child in list(getattr(coll, "children", [])):
+            walk(child)
+        for obj in list(getattr(coll, "objects", [])):
+            objects.append(obj)
+        collections.append(coll)
+
+    for child in list(getattr(root, "children", [])):
+        walk(child)
+    collections.append(root)
+    return objects, collections
 
 
 def clear_layers(context) -> None:
@@ -103,12 +135,21 @@ def _role_materials(layer: SliceLayer) -> dict[ContourRole, int]:
     return {ContourRole.CUT: 0, ContourRole.SCORE: 1, ContourRole.GUIDE: 2}, (cut, score, guide)
 
 
-def _new_curve_object(context, collection, name: str, layer: SliceLayer, settings) -> bpy.types.Object:
+def _bevel_depth(settings) -> float:
+    scale = max(1e-9, float(getattr(settings, "unit_scale_mm", 1000.0)))
+    return max(0.0, float(getattr(settings, "curve_radius_mm", 0.15)) / scale)
+
+
+def _new_curve_object(
+    context, collection, name: str, layer: SliceLayer, settings, bevel: bool = True
+) -> bpy.types.Object:
     curve = bpy.data.curves.new(name, type="CURVE")
     curve.dimensions = "3D"
     curve.resolution_u = 1
-    scale = max(1e-9, float(getattr(settings, "unit_scale_mm", 1000.0)))
-    curve.bevel_depth = max(0.0, float(getattr(settings, "curve_radius_mm", 0.15)) / scale)
+    # A stepped builder passes ``bevel=False`` and sets the depth once the
+    # curves are complete: rebuilding the bevel solid of a half-filled spline
+    # on every redraw is what makes a big scene crawl while it is drawn.
+    curve.bevel_depth = _bevel_depth(settings) if bevel else 0.0
     curve.bevel_resolution = 0
     curve.use_fill_caps = True
 
@@ -172,39 +213,215 @@ def _iter_layer_slices(layer: SliceLayer):
         )
 
 
+class LayerBuilder:
+    """Draws the viewport curves in small, resumable steps.
+
+    Two levels of chunking matter: a scene can hold hundreds of slices *and* a
+    single slice can carry hundreds of thousands of points, so a step writes a
+    bounded number of points and may stop in the **middle of a contour**.  Even
+    the removal of a previous result is batched.  A ``bpy.app.timers`` pump then
+    spends a few milliseconds per tick and the window keeps painting; one
+    blocking ``build_layers`` call is what used to freeze the interface.
+    """
+
+    #: Objects removed from the scene per step while clearing the old result.
+    CLEAR_BATCH = 64
+
+    def __init__(self, context, layers: list[SliceLayer], settings) -> None:
+        self.context = context
+        self.settings = settings
+        self.layers = [layer for layer in layers if layer.visible and layer.slices]
+        self.total = sum(
+            len(points)
+            for layer in self.layers
+            for item in _iter_layer_slices(layer)
+            for _role, _closed, points in item[4]
+        )
+        self.drawn = 0
+        self.finished = False
+        self._root = None
+        self._collection = None
+        self._source_name = ""
+        self._queue = None
+        self._slice: dict | None = None
+        self._clear_done = False
+        self._doomed: list | None = None
+        self._doomed_collections: list = []
+
+    @property
+    def progress(self) -> float:
+        if self.total <= 0:
+            return 1.0
+        return min(1.0, self.drawn / float(self.total))
+
+    # ------------------------------------------------------------------ steps
+    def step(self, budget: int = 600) -> bool:
+        """Write at most ``budget`` points; ``True`` once everything is drawn."""
+
+        if not self._clear_step():
+            return False
+        if self.finished:
+            return True
+        written = 0
+        while written < budget:
+            if self._slice is None and not self._start_next():
+                self.finished = True
+                return True
+            written += self._write(budget - written)
+        return False
+
+    def run(self, budget: int = 600) -> None:
+        while not self.step(budget):
+            pass
+
+    # ---------------------------------------------------------------- clearing
+    def _clear_step(self) -> bool:
+        """Remove the previous result in batches; ``True`` when the scene is clean."""
+
+        if self._clear_done:
+            return True
+        if self._doomed is None:
+            self._doomed, self._doomed_collections = _doomed_children()
+            self._source_name = getattr(
+                getattr(self.settings, "source_object", None), "name", ""
+            )
+        if self._doomed:
+            batch = self._doomed[: self.CLEAR_BATCH]
+            del self._doomed[: len(batch)]
+            for obj in batch:
+                bpy.data.objects.remove(obj, do_unlink=True)
+            return False
+        for coll in self._doomed_collections:
+            bpy.data.collections.remove(coll)
+        self._doomed_collections = []
+        _purge_orphans()
+        self._root = ensure_collection(self.context) if self.layers else None
+        self._queue = iter(list(self._items()))
+        self._clear_done = True
+        if self.total > 20000:
+            print(
+                "[slicer] drawing %d points over %d layer(s) in steps"
+                % (self.total, len(self.layers))
+            )
+        return True
+
+    def _items(self):
+        for layer in self.layers:
+            yield layer, None
+            for item in _iter_layer_slices(layer):
+                yield layer, item
+
+    def _start_next(self) -> bool:
+        """Open the next drawable slice; ``False`` when the queue is done."""
+
+        while True:
+            try:
+                layer, item = next(self._queue)
+            except StopIteration:
+                return False
+            if item is None:
+                self._collection = bpy.data.collections.new(layer.name)
+                self._root.children.link(self._collection)
+                continue
+            if self._open_slice(layer, item):
+                return True
+
+    def _open_slice(self, layer: SliceLayer, item) -> bool:
+        index, frame_id, slice_id, changed, contours = item
+        frame = layer.frames.get(frame_id or "")
+        if frame is None:
+            return False
+        self._slice = {
+            "layer": layer,
+            "index": index,
+            "frame_id": frame_id,
+            "slice_id": slice_id,
+            "changed": changed,
+            "frame": frame,
+            "contours": contours,
+            "next": 0,
+            "obj": None,
+            "spline": None,
+            "points": (),
+            "at": 0,
+        }
+        return self._open_contour()
+
+    def _open_contour(self) -> bool:
+        """Attach the next drawable contour; ``False`` when the slice is done."""
+
+        state = self._slice
+        layer = state["layer"]
+        while state["next"] < len(state["contours"]):
+            role, closed, points = state["contours"][state["next"]]
+            if len(points) >= 2:
+                if state["obj"] is None:
+                    name = f"Slice_{_safe(layer.id)}_{state['index']:03d}"
+                    state["obj"] = _new_curve_object(
+                        self.context,
+                        self._collection,
+                        name,
+                        layer,
+                        self.settings,
+                        bevel=False,
+                    )
+                spline = state["obj"].data.splines.new("POLY")
+                spline.points.add(len(points) - 1)
+                spline.use_cyclic_u = bool(closed)
+                spline.material_index = _role_index(role)
+                state["spline"] = spline
+                state["points"] = points
+                state["at"] = 0
+                return True
+            state["next"] += 1
+        return False
+
+    def _write(self, budget: int) -> int:
+        """Write up to ``budget`` points of the open contour; returns the count."""
+
+        state = self._slice
+        points = state["points"]
+        frame = state["frame"]
+        spline = state["spline"]
+        start = state["at"]
+        stop = min(len(points), start + max(1, int(budget)))
+        for index in range(start, stop):
+            x, y, z = frame.to_3d(points[index])
+            spline.points[index].co = (x, y, z, 1.0)
+        state["at"] = stop
+        written = stop - start
+        self.drawn += written
+        if stop >= len(points):
+            state["next"] += 1
+            if not self._open_contour():
+                self._finish_slice()
+        return written
+
+    def _finish_slice(self) -> None:
+        state = self._slice
+        self._slice = None
+        obj = state["obj"]
+        if obj is None:
+            return
+        # Every point is in place: give the curve its thickness now, in one go.
+        try:
+            obj.data.bevel_depth = _bevel_depth(self.settings)
+        except AttributeError:  # data swapped out from under us
+            pass
+        layer = state["layer"]
+        obj["slicer_layer_id"] = layer.id
+        obj["slicer_layer_name"] = layer.name
+        obj["slicer_slice_id"] = state["slice_id"]
+        obj["slicer_frame_id"] = state["frame_id"] or ""
+        obj["slicer_changed"] = bool(state["changed"])
+        obj["slicer_status"] = layer.status
+        obj["slicer_source"] = layer.source_name or self._source_name
+
+
 def build_layers(context, layers: list[SliceLayer], settings) -> None:
     """Draw every visible layer; a layer's result wins over its source slices."""
 
-    clear_collection(context)
-    layers = [layer for layer in layers if layer.visible and layer.slices]
-    if not layers:
-        return
-    root = ensure_collection(context)
-    source_name = getattr(getattr(settings, "source_object", None), "name", "")
-
-    for layer in layers:
-        collection = bpy.data.collections.new(layer.name)
-        root.children.link(collection)
-        for index, frame_id, slice_id, changed, contours in _iter_layer_slices(layer):
-            frame = layer.frames.get(frame_id or "")
-            if frame is None:
-                continue
-            name = f"Slice_{_safe(layer.id)}_{index:03d}"
-            obj = _new_curve_object(context, collection, name, layer, settings)
-            count = 0
-            for role, closed, points in contours:
-                if _add_contour(obj, frame, role, points, closed):
-                    count += 1
-            if count == 0:
-                bpy.data.objects.remove(obj, do_unlink=True)
-                continue
-            obj["slicer_layer_id"] = layer.id
-            obj["slicer_layer_name"] = layer.name
-            obj["slicer_slice_id"] = slice_id
-            obj["slicer_frame_id"] = frame_id or ""
-            obj["slicer_changed"] = bool(changed)
-            obj["slicer_status"] = layer.status
-            obj["slicer_source"] = layer.source_name or source_name
+    LayerBuilder(context, layers, settings).run(budget=1 << 30)
 
 
 # ------------------------------------------------------------------ contacts

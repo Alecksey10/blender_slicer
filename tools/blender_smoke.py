@@ -113,7 +113,7 @@ def run_checks(bpy, addon, settings_io, ui_schema, operators, panels, RUNTIME) -
     settings.fillet_radius_mm = 20.0
     settings.fillet_arc_segments = 4
     settings.fillet_mode = "clamp"
-    settings.smooth_enabled = False
+    settings.smooth_curve_enabled = False
     settings.simplify_enabled = False
     settings.densify_enabled = True
     settings.densify_max_spacing_mm = 5.0

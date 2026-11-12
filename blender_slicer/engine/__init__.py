@@ -40,11 +40,12 @@ from ..protocol import (
     result_from_dict,
     result_to_dict,
 )
-from ..protocol.errors import ConfigError, DomainError, SlicerError
+from ..protocol.errors import Cancelled, ConfigError, DomainError, SlicerError
 from ..spatial.frames import CoordinateFrame, FrameStore, make_frame
 from .facade import Engine, describe_methods
 from .methods import (
     BendCheckMethod,
+    OptimizeCurveMethod,
     CutThinSectionsMethod,
     DensifyMethod,
     FilletMethod,
@@ -59,6 +60,7 @@ from .methods import (
     with_points,
 )
 from .parallel import available_workers, process_parallel, resolve_workers, split_request
+from .progress import ProgressReporter
 from .registry import MethodRegistry, validate_params
 
 __all__ = [
@@ -76,6 +78,8 @@ __all__ = [
     "SlicerError",
     "DomainError",
     "ConfigError",
+    "Cancelled",
+    "ProgressReporter",
     "Method",
     "MethodContext",
     "with_points",
@@ -87,6 +91,7 @@ __all__ = [
     "ResampleMethod",
     "ShrinkMethod",
     "LimitCurvatureMethod",
+    "OptimizeCurveMethod",
     "BendCheckMethod",
     "CutThinSectionsMethod",
     "Point2",

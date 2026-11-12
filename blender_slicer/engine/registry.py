@@ -12,10 +12,12 @@ from .methods import (
     LimitCurvatureMethod,
     Method,
     OffsetMethod,
+    OptimizeCurveMethod,
     ResampleMethod,
     ShrinkMethod,
     SimplifyMethod,
     SmoothMethod,
+    SmoothCurveApproxMethod,
     TrimTightCornersMethod,
 )
 from ..protocol.types import ErrorCode
@@ -74,9 +76,11 @@ class MethodRegistry:
             SmoothMethod(),
             SimplifyMethod(),
             DensifyMethod(),
+            SmoothCurveApproxMethod(),
             ResampleMethod(),
             ShrinkMethod(),
             LimitCurvatureMethod(),
+            OptimizeCurveMethod(),
             BendCheckMethod(),
         ):
             registry.register(method)

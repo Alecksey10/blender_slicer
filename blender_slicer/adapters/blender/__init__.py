@@ -31,9 +31,10 @@ def unregister() -> None:
     if not _REGISTERED:
         return
 
-    from . import adapter, i18n, operators, panels, properties
+    from . import adapter, i18n, jobs, operators, panels, properties
     from blender_slicer.adapters.base.runtime import RUNTIME
 
+    jobs.shutdown()
     adapter.unsubscribe_events()
     panels.unregister()
     operators.unregister()

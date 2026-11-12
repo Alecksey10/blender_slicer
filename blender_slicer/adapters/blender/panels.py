@@ -47,6 +47,16 @@ class SLICER_PT_main(bpy.types.Panel):
         header.label(text=settings.status or tr("Ready"), icon=_status_icon(settings))
         layout.label(text=settings.status_detail)
 
+        if getattr(settings, "job_running", False):
+            job = layout.box()
+            job.label(
+                text=settings.job_message or tr("Working..."), icon="TIME"
+            )
+            job.prop(settings, "job_progress", text=tr("Progress"), slider=True)
+            row = job.row(align=True)
+            row.enabled = not getattr(settings, "job_cancelling", False)
+            row.operator("slicer.cancel", text=tr("Cancel"), icon="CANCEL")
+
         box = layout.box()
         box.label(text=tr("Actions"))
         row = box.row(align=True)
@@ -119,15 +129,21 @@ class SLICER_PT_layers(bpy.types.Panel):
         layout.operator("slicer.clear_layers", icon="TRASH")
 
 
-def _section_panel(section, order: int) -> type:
+def _section_panel(section, order: int, sections=None) -> type:
     """Build one collapsible sub-panel from the declarative UI schema."""
+
+    sections = sections or (section,)
 
     def draw(self, context) -> None:
         settings = getattr(context.scene, "slicer_settings", None)
         if settings is None:
             self.layout.label(text=tr("Settings are not registered"), icon="ERROR")
             return
-        draw_sections(self.layout, settings, (section,), boxed=False)
+        if len(sections) == 1:
+            draw_sections(self.layout, settings, sections, boxed=False)
+            _optimizer_readout(self.layout, settings, sections[0].id)
+            return
+        draw_sections(self.layout, settings, sections, boxed=True)
 
     namespace: dict[str, Any] = {
         "__module__": __name__,
@@ -144,9 +160,60 @@ def _section_panel(section, order: int) -> type:
     return type(f"SLICER_PT_{section.id}", (bpy.types.Panel,), namespace)
 
 
-SECTION_PANELS = tuple(
-    _section_panel(section, index + 1) for index, section in enumerate(SECTIONS)
-)
+def _optimizer_readout(layout, settings, section_id: str) -> None:
+    """Explain the solve in the panel: what it replaces and how it trades.
+
+    The two weights are not intuitive as numbers, but their ratio is: it is how
+    many millimetres of deviation one radian of extra bending is worth.
+    """
+
+    if section_id != "optimize" or not getattr(settings, "optimize_enabled", False):
+        return
+    box = layout.box()
+    data = max(1e-9, float(getattr(settings, "optimize_data_weight", 20.0)))
+    radius = max(0.0, float(getattr(settings, "optimize_radius_weight", 1000.0)))
+    box.label(
+        text=tr("Deviation per radian: {value} mm", value=f"{(radius / data) ** 0.5:.2f}")
+    )
+    box.label(text=tr("Replaces fillet, smoothing and curvature limiting"), icon="INFO")
+
+
+def _grouped_panels() -> list[type]:
+    """One panel per section, except grouped sections that share a panel."""
+
+    panels: list[type] = []
+    seen: dict[str, list] = {}
+    for index, section in enumerate(SECTIONS):
+        if not section.group:
+            panels.append(_section_panel(section, index + 1))
+            continue
+        bucket = seen.setdefault(section.group, [])
+        bucket.append(section)
+        if len(bucket) > 1:
+            continue
+        title = "Legacy shaping" if section.group == "legacy" else section.title
+        panels.append(
+            _section_panel(
+                _Renamed(section, f"{section.group}_group", title),
+                index + 1,
+                sections=bucket,
+            )
+        )
+    return panels
+
+
+class _Renamed:
+    """A section view with its own id/title, used for grouped panels."""
+
+    __slots__ = ("id", "title", "open")
+
+    def __init__(self, section, panel_id: str, title: str) -> None:
+        self.id = panel_id
+        self.title = title
+        self.open = section.open
+
+
+SECTION_PANELS = tuple(_grouped_panels())
 
 
 class SLICER_PT_report(bpy.types.Panel):

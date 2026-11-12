@@ -64,7 +64,7 @@ class SettingsToOperationsTests(unittest.TestCase):
             names,
             [
                 "fillet_corners",
-                "smooth",
+                "smooth_curve_approx",
                 "simplify",
                 "densify",
                 "resample",
@@ -79,10 +79,56 @@ class SettingsToOperationsTests(unittest.TestCase):
             params = validate_params(method.descriptor, op.params)
             self.assertEqual(set(params), {p.name for p in method.descriptor.params})
 
+    def test_optimizer_option_is_mapped_and_validated(self):
+        settings = fake_blender.make_settings(optimize_enabled=True)
+        operations = adapter.operations_from_settings(settings)
+        self.assertEqual(
+            [op.method for op in operations],
+            ["simplify", "optimize_curve", "densify"],
+        )
+        engine = Engine()
+        for op in operations:
+            params = validate_params(engine.registry.get(op.method).descriptor, op.params)
+            self.assertEqual(
+                set(params), {p.name for p in engine.registry.get(op.method).descriptor.params}
+            )
+
+    def test_optimizer_supersedes_the_sequential_shaping_stages(self):
+        settings = fake_blender.make_settings(
+            optimize_enabled=True,
+            fillet_enabled=True,
+            smooth_curve_enabled=True,
+            cut_thin_enabled=True,
+            trim_tight_enabled=True,
+            limit_curvature_enabled=True,
+        )
+        names = [op.method for op in adapter.operations_from_settings(settings)]
+        for legacy in (
+            "fillet_corners",
+            "smooth_curve_approx",
+            "limit_curvature",
+            "cut_thin_sections",
+            "trim_tight_corners",
+        ):
+            self.assertNotIn(legacy, names)
+        self.assertIn("optimize_curve", names)
+        # Detail is restored after the fit, never before it.
+        self.assertLess(names.index("simplify"), names.index("optimize_curve"))
+        self.assertLess(names.index("optimize_curve"), names.index("densify"))
+
+    def test_legacy_stages_run_with_the_optimizer_off(self):
+        settings = fake_blender.make_settings(
+            optimize_enabled=False, fillet_enabled=True, limit_curvature_enabled=True
+        )
+        names = [op.method for op in adapter.operations_from_settings(settings)]
+        self.assertIn("fillet_corners", names)
+        self.assertIn("limit_curvature", names)
+        self.assertNotIn("optimize_curve", names)
+
     def test_optional_operations_can_be_disabled(self):
         settings = fake_blender.make_settings(
             fillet_enabled=False,
-            smooth_enabled=False,
+            smooth_curve_enabled=False,
             simplify_enabled=False,
             densify_enabled=False,
         )
@@ -130,6 +176,13 @@ class _RecorderLayout:
     def operators(self):
         return [args[0] for name, args, _kwargs in self.calls if name == "operator" and args]
 
+    def labels(self):
+        return [
+            kwargs.get("text", args[0] if args else "")
+            for name, args, kwargs in self.calls
+            if name == "label"
+        ]
+
     def props(self):
         return [
             (args[0], args[1])
@@ -174,11 +227,44 @@ class PanelDrawTests(unittest.TestCase):
     def test_every_schema_section_is_a_sub_panel_of_main(self):
         from blender_slicer.adapters.blender.ui_schema import SECTIONS
 
+        expected: list[str] = []
+        grouped: set[str] = set()
+        for section in SECTIONS:
+            if not section.group:
+                expected.append(section.title)
+            elif section.group not in grouped:
+                grouped.add(section.group)
+                # Grouped sections share one collapsed "Legacy shaping" panel.
+                expected.append("Legacy shaping")
+
         labels = [cls.bl_label for cls in self.panels.SECTION_PANELS]
-        self.assertEqual(labels, [section.title for section in SECTIONS])
+        self.assertEqual(labels, expected)
         for cls in self.panels.SECTION_PANELS:
             self.assertEqual(cls.bl_parent_id, "SLICER_PT_main")
             self.assertTrue(cls.bl_idname.startswith("SLICER_PT_"))
+
+    def test_optimizer_panel_is_open_near_the_top(self):
+        panel = next(
+            cls for cls in self.panels.SECTION_PANELS if cls.bl_idname == "SLICER_PT_optimize"
+        )
+        self.assertNotIn("DEFAULT_CLOSED", set(panel.bl_options))
+        self.assertEqual(panel.bl_label, "Least-squares optimizer")
+        # Right after Source and Slice plan: the solve is the main control.
+        self.assertEqual(panel.bl_order, 3)
+
+    def test_optimizer_panel_explains_the_trade(self):
+        self.settings.optimize_enabled = True
+        layout = self._draw(
+            next(
+                cls
+                for cls in self.panels.SECTION_PANELS
+                if cls.bl_idname == "SLICER_PT_optimize"
+            )
+        )
+        texts = layout.labels()
+        self.assertTrue(any("Deviation per radian" in text for text in texts), texts)
+        self.assertIn("optimize_data_weight", [name for _obj, name in layout.props()])
+        self.assertIn("optimize_radius_weight", [name for _obj, name in layout.props()])
 
     def test_sections_draw_only_existing_properties(self):
         for cls in self.panels.SECTION_PANELS:
@@ -207,6 +293,15 @@ class PanelDrawTests(unittest.TestCase):
         self.assertIn("angle_start_deg", radial)
         self.assertIn("angle_end_deg", radial)
         self.assertNotIn("spacing_mm", radial)
+
+    def test_running_job_shows_progress_and_a_cancel_button(self):
+        self.settings.job_running = True
+        self.settings.job_message = "optimize_curve · slice 2/5 · iteration 3/40"
+        self.settings.job_progress = 0.4
+        layout = self._draw(self.panels.SLICER_PT_main)
+        self.assertIn("slicer.cancel", layout.operators())
+        self.assertIn("job_progress", [name for _obj, name in layout.props()])
+        self.settings.job_running = False
 
     def test_no_field_reports_an_error(self):
         for cls in self.panels.CLASSES:
@@ -268,6 +363,11 @@ class SettingsCoverageTests(unittest.TestCase):
             "last_errors",
             "last_warnings",
             "last_contacts",
+            # Written by the main-thread job pump, never part of a recipe.
+            "job_running",
+            "job_progress",
+            "job_message",
+            "job_cancelling",
         }
         exported = set(settings_io.FIELDS)
         missing = sorted(
@@ -520,6 +620,410 @@ class FilletConsistencyTests(unittest.TestCase):
         x_slices, _frames = slicing.generate_slices(self.context, x_settings)
         for slice_ in x_slices:
             self.assertGreater(slice_.offset_mm, 0.0)  # X cuts are outward
+
+
+class BackgroundJobTests(unittest.TestCase):
+    """The worker thread + main-thread pump behind the Cancel button."""
+
+    def _pump_until_done(self, runner, timeout: float = 5.0) -> dict:
+        import time
+
+        deadline = time.perf_counter() + timeout
+        state = runner.snapshot()
+        while state["running"] and time.perf_counter() < deadline:
+            state = runner.pump()
+            time.sleep(0.005)
+        return state
+
+    def test_job_applies_its_result_on_the_pump(self):
+        from blender_slicer.adapters.blender import jobs
+
+        runner = jobs.JobRunner()
+        applied: list[int] = []
+        finished: list[dict] = []
+
+        def work(reporter):
+            reporter.update(fraction=0.5, stage="optimize_curve", slice_index=1, slices_total=4)
+            return 42
+
+        runner.start("test", work, apply=applied.append, finish=lambda **kw: finished.append(kw))
+        state = self._pump_until_done(runner)
+
+        self.assertEqual(applied, [42])
+        self.assertEqual(finished, [{"error": None, "cancelled": False}])
+        self.assertFalse(state["running"])
+        self.assertAlmostEqual(state["progress"], 1.0)
+
+    def test_progress_is_combined_across_slices(self):
+        from blender_slicer.adapters.blender import jobs
+
+        runner = jobs.JobRunner()
+        seen: list[float] = []
+        original = runner._on_progress
+
+        def spy(data):
+            original(data)
+            seen.append(runner.snapshot()["progress"])
+
+        runner._on_progress = spy
+
+        def work(reporter):
+            reporter.update(fraction=0.5, slice_index=1, slices_total=4)
+            return None
+
+        runner.start("test", work)
+        self._pump_until_done(runner)
+        # (1 + 0.5) / 4 of the whole request.
+        self.assertTrue(seen)
+        self.assertAlmostEqual(seen[-1], 0.375)
+
+    def test_cancel_reaches_the_worker(self):
+        import time
+
+        from blender_slicer.adapters.blender import jobs
+
+        runner = jobs.JobRunner()
+        finished: list[dict] = []
+        started = []
+
+        def work(reporter):
+            started.append(True)
+            for _ in range(2000):
+                reporter.check()
+                time.sleep(0.005)
+            return "never"
+
+        runner.start("test", work, finish=lambda **kw: finished.append(kw))
+        while not started:
+            time.sleep(0.005)
+        self.assertTrue(runner.cancel())
+        self._pump_until_done(runner)
+        self.assertEqual(finished, [{"error": None, "cancelled": True}])
+
+    def test_second_job_is_rejected_while_one_runs(self):
+        import time
+
+        from blender_slicer.adapters.blender import jobs
+
+        runner = jobs.JobRunner()
+        started = []
+
+        def work(reporter):
+            started.append(True)
+            time.sleep(0.05)
+            return 1
+
+        runner.start("test", work)
+        while not started:
+            time.sleep(0.005)
+        with self.assertRaises(RuntimeError):
+            runner.start("other", lambda reporter: None)
+        self._pump_until_done(runner)
+
+    def test_engine_cancel_travels_through_the_job(self):
+        import time
+
+        from blender_slicer.adapters.blender import jobs
+        from blender_slicer.engine import Engine
+        from blender_slicer.protocol.types import (
+            Contour,
+            ContourRole,
+            OperationSpec,
+            ProcessingRequest,
+            Slice,
+        )
+
+        square = [(0.0, 0.0), (20.0, 0.0), (20.0, 20.0), (0.0, 20.0)]
+        request = ProcessingRequest(
+            request_id="job-cancel",
+            slices=[
+                Slice(
+                    id=f"s{index}",
+                    index=index,
+                    contours=[Contour(f"s{index}.c0", ContourRole.CUT, True, list(square))],
+                )
+                for index in range(8)
+            ],
+            operations=[
+                OperationSpec(
+                    method="optimize_curve",
+                    params={"sample_points": 1200, "max_iterations": 500},
+                )
+            ],
+        )
+        engine = Engine()
+        runner = jobs.JobRunner()
+        finished: list[dict] = []
+
+        def work(reporter):
+            return engine.process(request, reporter)
+
+        started = time.perf_counter()
+        runner.start("process", work, finish=lambda **kw: finished.append(kw))
+        # Cancel only once the engine is demonstrably working on a slice.
+        deadline = time.perf_counter() + 5.0
+        while runner.snapshot()["progress"] <= 0.0 and time.perf_counter() < deadline:
+            time.sleep(0.002)
+        self.assertTrue(runner.cancel())
+        self._pump_until_done(runner, timeout=10.0)
+        elapsed = time.perf_counter() - started
+
+        self.assertEqual(finished, [{"error": None, "cancelled": True}])
+        self.assertLess(elapsed, 8.0)
+
+    def test_start_falls_back_when_the_host_has_no_timers(self):
+        from blender_slicer.adapters.blender import jobs
+
+        # Without ``app.timers`` the add-on must fall back to a synchronous run
+        # instead of silently doing nothing.
+        timers = bpy.app.timers
+        bpy.app.timers = None
+        try:
+            self.assertFalse(jobs.timer_available())
+            self.assertFalse(jobs.start("test", lambda reporter: None))
+            self.assertFalse(jobs.start_chunked(lambda: True))
+        finally:
+            bpy.app.timers = timers
+        self.assertIsNone(jobs.shutdown())
+
+
+class ChunkedRunnerTests(unittest.TestCase):
+    """Main-thread work that must not block one timer tick."""
+
+    def test_steps_run_until_done_and_report_progress(self):
+        from blender_slicer.adapters.blender import jobs
+
+        runner = jobs.ChunkedRunner()
+        done: list[str] = []
+        state = {"step": 0}
+
+        def step() -> bool:
+            state["step"] += 1
+            return state["step"] >= 4
+
+        self.assertTrue(
+            runner.start(
+                step,
+                finish=lambda: done.append("finished"),
+                message="building",
+                progress=lambda: state["step"] / 4.0,
+            )
+        )
+        runner.advance()
+
+        self.assertEqual(done, ["finished"])
+        self.assertFalse(runner.active)
+        self.assertEqual(runner.snapshot()["progress"], 1.0)
+
+    def test_second_task_is_rejected_and_cancel_drops_it(self):
+        from blender_slicer.adapters.blender import jobs
+
+        runner = jobs.ChunkedRunner()
+        finished: list[bool] = []
+        self.assertTrue(runner.start(lambda: False, finish=lambda: finished.append(True)))
+        self.assertFalse(runner.start(lambda: True))
+        self.assertTrue(runner.cancel())
+        runner.advance()
+        self.assertEqual(finished, [])
+
+
+class SlicingSplitTests(unittest.TestCase):
+    """Slicing is bidirectionally split: bpy copy, then plain maths."""
+
+    def test_build_slices_reproduces_generate_slices(self):
+        from blender_slicer.adapters.base.plan import SlicePlan
+
+        settings = fake_blender.make_settings(
+            source_object=fake_blender.FakeMeshObject(), count=4
+        )
+        context = fake_blender.FakeContext()
+        plan = SlicePlan.from_settings(settings)
+
+        direct, direct_frames = slicing.generate_slices(context, settings, plan)
+        verts, tris = slicing.collect_geometry(context, settings.source_object)
+        split, split_frames = slicing.build_slices(verts, tris, plan)
+
+        self.assertEqual(len(direct), len(split))
+        self.assertEqual(set(direct_frames), set(split_frames))
+        for expected, actual in zip(direct, split):
+            self.assertEqual(
+                [c.points for c in expected.contours],
+                [c.points for c in actual.contours],
+            )
+
+    def test_build_slices_reports_progress_and_honours_cancel(self):
+        from blender_slicer.adapters.base.plan import SlicePlan
+        from blender_slicer.protocol.errors import Cancelled
+
+        settings = fake_blender.make_settings(
+            source_object=fake_blender.FakeMeshObject(), count=5
+        )
+        context = fake_blender.FakeContext()
+        plan = SlicePlan.from_settings(settings)
+        verts, tris = slicing.collect_geometry(context, settings.source_object)
+
+        seen: list[tuple[int, int]] = []
+        slicing.build_slices(verts, tris, plan, progress=lambda a, b: seen.append((a, b)))
+        self.assertEqual(seen[0], (1, 5))
+        self.assertEqual(seen[-1], (5, 5))
+
+        with self.assertRaises(Cancelled):
+            slicing.build_slices(verts, tris, plan, cancel=lambda: True)
+
+
+def _pump_timers(timeout: float = 30.0) -> int:
+    """Run the add-on's timer callbacks until no job or build is left."""
+
+    import time
+
+    from blender_slicer.adapters.blender import jobs
+
+    ticks = 0
+    deadline = time.perf_counter() + timeout
+    while (jobs.JOBS.active or jobs.CHUNKS.active) and time.perf_counter() < deadline:
+        bpy.app.timers.tick()
+        ticks += 1
+        time.sleep(0.002)
+    return ticks
+
+
+class LayerBuilderTests(unittest.TestCase):
+    """Viewport drawing spread over timer steps."""
+
+    def setUp(self):
+        from types import SimpleNamespace
+
+        RUNTIME.clear()
+        bpy.data = fake_blender.data_stores()
+        self.settings = fake_blender.make_settings(
+            source_object=fake_blender.FakeMeshObject(), count=3, build_curves=True
+        )
+        scene = SimpleNamespace(
+            slicer_settings=self.settings,
+            collection=fake_blender.FakeSceneCollection(),
+        )
+        self.context = fake_blender.FakeContext(scene=scene)
+
+    def tearDown(self):
+        RUNTIME.clear()
+
+    def test_generate_queues_the_drawing_instead_of_blocking(self):
+        from blender_slicer.adapters.blender import jobs
+
+        adapter.generate(self.context, self.settings)
+        self.assertTrue(jobs.CHUNKS.active)
+        self.assertEqual(len(list(bpy.data.objects)), 0)
+        _pump_timers()
+        self.assertFalse(jobs.CHUNKS.active)
+        layer = RUNTIME.layers.active
+        names = [obj.name for obj in bpy.data.objects if obj.name.startswith("Slice_")]
+        self.assertEqual(len(names), len(layer.slices))
+
+    def test_drawing_is_spread_over_several_steps(self):
+        from blender_slicer.adapters.blender import visualization
+
+        adapter.generate(self.context, self.settings)
+        _pump_timers()
+        layer = RUNTIME.layers.active
+        self.assertIsNotNone(layer)
+        self.settings.job_running = False
+        points = sum(
+            len(item_points)
+            for item in visualization._iter_layer_slices(layer)
+            for _role, _closed, item_points in item[4]
+        )
+
+        builder = visualization.LayerBuilder(self.context, [layer], self.settings)
+        steps = 0
+        while not builder.step(budget=2):
+            steps += 1
+            self.assertLess(steps, 500)
+
+        # A tiny budget resumes in the middle of a contour, so it takes many
+        # steps rather than one per slice.
+        self.assertGreater(steps, len(layer.slices))
+        self.assertLessEqual(steps, points)
+        self.assertAlmostEqual(builder.progress, 1.0)
+        names = [obj.name for obj in bpy.data.objects if obj.name.startswith("Slice_")]
+        self.assertEqual(len(names), len(layer.slices))
+
+    def test_bevel_is_applied_only_to_finished_curves(self):
+        from blender_slicer.adapters.blender import visualization
+
+        adapter.generate(self.context, self.settings)
+        _pump_timers()
+        layer = RUNTIME.layers.active
+        # Start from an empty file so the very first step draws instead of
+        # clearing the result the generate just made.
+        bpy.data = fake_blender.data_stores()
+
+        builder = visualization.LayerBuilder(self.context, [layer], self.settings)
+        builder.step(budget=1)
+        obj = next(iter(bpy.data.objects))
+        self.assertEqual(obj.data.bevel_depth, 0.0)
+
+        while not builder.step(budget=4):
+            pass
+        expected = self.settings.curve_radius_mm / self.settings.unit_scale_mm
+        self.assertAlmostEqual(obj.data.bevel_depth, expected)
+
+
+class BackgroundRunTests(unittest.TestCase):
+    """Generate, process and draw, driven entirely by the timer pump."""
+
+    def setUp(self):
+        import time  # noqa: F401  (used by the helpers below)
+        from types import SimpleNamespace
+
+        self.time = time
+        RUNTIME.clear()
+        bpy.data = fake_blender.data_stores()
+        self.settings = fake_blender.make_settings(
+            source_object=fake_blender.FakeMeshObject(), count=3, build_curves=True
+        )
+        scene = SimpleNamespace(
+            slicer_settings=self.settings,
+            collection=fake_blender.FakeSceneCollection(),
+        )
+        self.context = fake_blender.FakeContext(scene=scene)
+        bpy.context = self.context
+
+    def tearDown(self):
+        from blender_slicer.adapters.blender import jobs
+
+        jobs.shutdown()
+        RUNTIME.clear()
+        if hasattr(bpy, "context"):
+            del bpy.context
+
+    def _pump(self, timeout: float = 30.0) -> int:
+        return _pump_timers(timeout)
+
+    def test_run_slices_processes_and_draws_from_the_pump(self):
+        from blender_slicer.adapters.blender import adapter, jobs
+
+        self.assertTrue(adapter.start_run(self.context, self.settings, regenerate=True))
+        self.assertTrue(self.settings.job_running)
+        self.assertGreater(self._pump(), 0)
+
+        self.assertFalse(jobs.JOBS.active)
+        self.assertFalse(jobs.CHUNKS.active)
+        layer = RUNTIME.layers.active
+        self.assertIsNotNone(layer)
+        self.assertEqual(len(layer.slices), 3)
+        self.assertIsNotNone(layer.result)
+        self.assertEqual(layer.result.status, ResultStatus.OK)
+        self.assertFalse(self.settings.job_running)
+        self.assertTrue(self.settings.status.startswith("OK"))
+        names = [obj.name for obj in bpy.data.objects if obj.name.startswith("Slice_")]
+        self.assertEqual(len(names), 3)
+
+    def test_process_without_generating_asks_for_slices(self):
+        from blender_slicer.adapters.blender import adapter
+        from blender_slicer.protocol.errors import ConfigError
+
+        with self.assertRaises(ConfigError):
+            adapter.start_run(self.context, self.settings, regenerate=False)
 
 
 if __name__ == "__main__":

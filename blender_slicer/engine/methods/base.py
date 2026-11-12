@@ -10,6 +10,7 @@ from ...protocol.types import (
     MaterialProfile,
     Severity,
 )
+from ..progress import ProgressReporter
 
 
 @dataclass
@@ -21,6 +22,32 @@ class MethodContext:
     contour_id: str | None = None
     slice_offset_mm: float = 0.0
     slice_metadata: dict = field(default_factory=dict)
+    #: Live monitor of a long method; ``None`` means "run silently".
+    progress: ProgressReporter | None = None
+    slice_index: int = -1
+    slices_total: int = 0
+
+    def report(self, fraction: float | None = None, message: str | None = None) -> None:
+        """Report progress of the current stage to the host, if it listens."""
+
+        if self.progress is None:
+            return
+        self.progress.update(
+            fraction=fraction,
+            message=message,
+            stage=self.stage,
+            slice_id=self.slice_id,
+            contour_id=self.contour_id,
+            slice_index=self.slice_index if self.slice_index >= 0 else None,
+            slices_total=self.slices_total or None,
+        )
+
+    def check_cancel(self) -> None:
+        """Raise ``Cancelled`` when the host asked to stop the request."""
+
+        if self.progress is not None:
+            self.progress.check()
+
 
     def warn(
         self,
