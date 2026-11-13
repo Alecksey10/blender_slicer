@@ -62,6 +62,9 @@ class SliceRunner:
             return self.failed(original, [self.domain_diag(exc, slice_.id)])
 
         partial = False
+        # Cross-slice frame lookup (hosts may pass CoordinateFrame objects via
+        # request.metadata["slice_frames"] for cross-section methods).
+        ctx_slice_frames = request.metadata.get("slice_frames") if request.metadata else None
         for op in request.operations:
             if not op.enabled:
                 continue
@@ -105,6 +108,8 @@ class SliceRunner:
                         contour_id=contour.id,
                         slice_offset_mm=state.offset_mm,
                         slice_metadata=dict(state.slice.metadata),
+                        all_slices=list(request.slices),
+                        slice_frames=ctx_slice_frames,
                         progress=reporter,
                         slice_index=state.index,
                         slices_total=reporter.slices_total if reporter is not None else 0,

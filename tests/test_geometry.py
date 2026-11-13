@@ -12,6 +12,7 @@ from blender_slicer.protocol.geometry import (
     approximate_smooth_curve,
     bend_allowance_mm,
     chaikin,
+    circle_tangent_point,
     collapse_collinear,
     count_self_intersections,
     cut_thin_sections,
@@ -19,6 +20,7 @@ from blender_slicer.protocol.geometry import (
     densify,
     dist,
     fillet_corners,
+    interpolate_guide,
     laplacian,
     limit_curvature,
     max_turn_deg,
@@ -28,10 +30,12 @@ from blender_slicer.protocol.geometry import (
     polyline_length,
     polyline_max_deviation,
     resample,
+    rod_centre_path,
     _segments_strictly_intersect,
     sharp_corners,
     signed_area,
     simplify,
+    tangent_offset_points,
     tight_corners,
     trim_tight_corners,
     vertex_radius,
@@ -567,6 +571,45 @@ class BezierApproxTests(unittest.TestCase):
         out = approximate_smooth_curve(SQUARE, True, 0.0, 16, 0.4, 0)
         for p in SQUARE:
             self.assertTrue(_has_point(out, p, 1e-6), f"anchor {p} missed")
+
+
+class TubePathTests(unittest.TestCase):
+    """Tests for tube / rod centreline geometry."""
+
+    GUIDE = [(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)]
+
+    def test_rod_centre_path_offsets_by_radius(self):
+        out = rod_centre_path(self.GUIDE, True, rod_radius_mm=2.0, side=1.0)
+        self.assertGreater(len(out), 0)
+        # Every guide vertex should have a corresponding output point ~2mm away.
+        for p in self.GUIDE:
+            self.assertTrue(
+                any(dist(p, q) < 2.1 for q in out),
+                f"guide vertex {p} has no nearby offset point",
+            )
+
+    def test_rod_centre_path_zero_radius_is_noop(self):
+        out = rod_centre_path(self.GUIDE, True, rod_radius_mm=0.0, side=1.0)
+        self.assertEqual(out, self.GUIDE)
+
+    def test_tangent_offset_inner_side(self):
+        out = tangent_offset_points(self.GUIDE, True, distance_mm=1.0, side=-1.0)
+        self.assertEqual(len(out), len(self.GUIDE))
+
+    def test_interpolate_guide_resamples(self):
+        out = interpolate_guide(self.GUIDE, True, samples=32, tension=0.5)
+        self.assertEqual(len(out), 32)
+
+    def test_circle_tangent_point(self):
+        guide_pt = (0.0, 0.0)
+        guide_tan = (1.0, 0.0)  # moving along +X
+        contact_pt = (0.0, 5.0)
+        result = circle_tangent_point(guide_pt, guide_tan, contact_pt, 3.0)
+        # Centre is at (0, 3), contact at distance 3 from centre.
+        cx, cy = 0.0, 3.0
+        dx = result[0] - cx
+        dy = result[1] - cy
+        self.assertAlmostEqual((dx * dx + dy * dy) ** 0.5, 3.0, places=6)
 
 
 if __name__ == "__main__":

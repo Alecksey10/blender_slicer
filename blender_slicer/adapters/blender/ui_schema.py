@@ -430,6 +430,54 @@ SECTIONS: tuple[Section, ...] = (
         ),
     ),
     Section(
+        id="tube_path",
+        group="legacy",
+        title="Tube path (group B)",
+        fields=(
+            make_field("tube_path_enabled"),
+            make_field(
+                "tube_path_rod_radius_mm",
+                "Rod radius (mm)",
+                visible={"prop": "tube_path_enabled", "truthy": True},
+            ),
+            make_field(
+                "tube_path_side",
+                "Offset side",
+                visible={"prop": "tube_path_enabled", "truthy": True},
+            ),
+            make_field(
+                "tube_path_use_cross_sections",
+                "Use cross-sections",
+                visible={"prop": "tube_path_enabled", "truthy": True},
+            ),
+            make_field(
+                "tube_path_cross_section_step_mm",
+                "Cross-section step (mm)",
+                visible={"prop": "tube_path_enabled", "truthy": True},
+            ),
+            make_field(
+                "tube_path_guide_group_tag",
+                "Guide group tag",
+                visible={"prop": "tube_path_enabled", "truthy": True},
+            ),
+            make_field(
+                "tube_path_contact_tolerance_mm",
+                "Contact tolerance (mm)",
+                visible={"prop": "tube_path_enabled", "truthy": True},
+            ),
+            make_field(
+                "tube_path_tension",
+                "Curve tension",
+                visible={"prop": "tube_path_enabled", "truthy": True},
+            ),
+            make_field(
+                "tube_path_arc_segments",
+                "Arc segments",
+                visible={"prop": "tube_path_enabled", "truthy": True},
+            ),
+        ),
+    ),
+    Section(
         id="curvature",
         group="legacy",
         title="Limit curvature",

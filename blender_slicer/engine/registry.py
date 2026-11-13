@@ -18,6 +18,7 @@ from .methods import (
     SimplifyMethod,
     SmoothMethod,
     SmoothCurveApproxMethod,
+    TubePathMethod,
     TrimTightCornersMethod,
 )
 from ..protocol.types import ErrorCode
@@ -82,6 +83,7 @@ class MethodRegistry:
             LimitCurvatureMethod(),
             OptimizeCurveMethod(),
             BendCheckMethod(),
+            TubePathMethod(),
         ):
             registry.register(method)
         return registry

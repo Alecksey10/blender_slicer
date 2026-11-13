@@ -44,6 +44,10 @@ FLOAT_FIELDS = (
     "smooth_curve_max_spacing_mm",
     "smooth_curve_min_radius_mm",
     "smooth_curve_preserve_corners_deg",
+    "tube_path_rod_radius_mm",
+    "tube_path_cross_section_step_mm",
+    "tube_path_contact_tolerance_mm",
+    "tube_path_tension",
     "simplify_tolerance_mm",
     "simplify_preserve_corners_deg",
     "densify_max_spacing_mm",
@@ -71,6 +75,7 @@ INT_FIELDS = (
     "fillet_arc_segments",
     "smooth_curve_segments_per_span",
     "smooth_curve_inertia_smoothing",
+    "tube_path_arc_segments",
     "limit_curvature_max_iterations",
     "optimize_points",
     "optimize_max_iterations",
@@ -87,6 +92,8 @@ BOOL_FIELDS = (
     "trim_tight_enabled",
     "smooth_curve_enabled",
     "smooth_curve_use_material_min_radius",
+    "tube_path_enabled",
+    "tube_path_use_cross_sections",
     "simplify_enabled",
     "densify_enabled",
     "resample_enabled",
@@ -113,6 +120,7 @@ ENUM_FIELDS = (
     "fillet_mode",
     "trim_tight_action",
     "smooth_curve_mode",
+    "tube_path_side",
     "inset_x_mode",
     "inset_y_mode",
     "inset_z_mode",
@@ -121,7 +129,9 @@ ENUM_FIELDS = (
 
 VECTOR_FIELDS = ("origin_offset_mm",)
 
-FIELDS = FLOAT_FIELDS + INT_FIELDS + BOOL_FIELDS + ENUM_FIELDS + VECTOR_FIELDS
+STRING_FIELDS = ("tube_path_guide_group_tag",)
+
+FIELDS = FLOAT_FIELDS + INT_FIELDS + BOOL_FIELDS + ENUM_FIELDS + VECTOR_FIELDS + STRING_FIELDS
 
 
 def _plain(value):
@@ -161,6 +171,8 @@ def _coerce(name: str, value):
     if name in BOOL_FIELDS:
         return bool(value)
     if name in ENUM_FIELDS:
+        return str(value)
+    if name in STRING_FIELDS:
         return str(value)
     if name in VECTOR_FIELDS:
         seq = list(value)

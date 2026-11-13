@@ -14,6 +14,7 @@ from .simplify import SimplifyMethod
 from .smooth import SmoothMethod
 from .smooth_curve_approx import SmoothCurveApproxMethod
 from .trim_tight import TrimTightCornersMethod
+from .tube_path import TubePathMethod
 
 __all__ = [
     "Method",
@@ -32,5 +33,6 @@ __all__ = [
     "SimplifyMethod",
     "SmoothMethod",
     "SmoothCurveApproxMethod",
+    "TubePathMethod",
     "TrimTightCornersMethod",
 ]

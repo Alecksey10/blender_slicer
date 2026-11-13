@@ -45,7 +45,8 @@ from typing import Any, Callable, Sequence
 
 from ..types import Point2
 from .core import dist, min_radius, polyline_length
-from .smoothing import limit_curvature
+from .corners import fillet_corners
+from .intersections import count_self_intersections
 
 EPS = 1e-12
 
@@ -65,8 +66,20 @@ AUTO_DENSITY_CAP = 600
 LAMBDA_MIN = 1e-9
 LAMBDA_MAX = 1e12
 
+#: Turns sharper than this are seeded with a fillet; shallower ones are already
+#: part of a curve and must not be cut into arcs.
+SEED_MIN_TURN_DEG = 30.0
+
 ProgressHook = Callable[[dict[str, Any]], None]
 CancelHook = Callable[[], bool]
+
+
+def _crosses(points: Sequence[Point2], closed: bool) -> bool:
+    """Does the polyline cross itself?  (Cheap guard, not a full validation.)"""
+
+    if len(points) < 4:
+        return False
+    return count_self_intersections([(float(p[0]), float(p[1])) for p in points], closed) > 0
 
 
 def resample_by_count(points: Sequence[Point2], closed: bool, count: int) -> list[Point2]:
@@ -415,6 +428,8 @@ def optimize_curve(
         "data_cost": 0.0,
         "smooth_cost": 0.0,
         "radius_cost": 0.0,
+        "radius_requested_mm": float(min_radius_mm or 0.0),
+        "radius_target_mm": float(min_radius_mm or 0.0),
     }
 
     if len(source) < 4:
@@ -438,31 +453,34 @@ def optimize_curve(
     bx = [p[0] for p in base]
     by = [p[1] for p in base]
 
+    radius_target = float(min_radius_mm) if min_radius_mm and min_radius_mm > 0 else 0.0
     if start is not None:
         seed = resample_by_count(start, closed, n)
-    elif min_radius_mm and min_radius_mm > 0:
-        # Corner rounding is a diffusion: it needs roughly (R / spacing)^2 passes
-        # to spread the turn of a tight corner, so relax in chunks until no
-        # vertex violates (a sharp corner left in the seed traps the fit in the
-        # cusp local minimum).  Chunks stop early, so an easily feasible
-        # contour costs a single O(n) sweep.
-        chunk = max(20, n)
-        budget = 40 * chunk
-        seed = base
-        remaining = 1
-        while remaining and budget > 0:
-            if cancel is not None and cancel():
-                stats["message"] = "cancelled"
-                stats["time"] = time.perf_counter() - started
-                return list(source), stats
-            seed, remaining = limit_curvature(
-                seed, closed, float(min_radius_mm), chunk, 0.5
-            )
-            budget -= chunk
+    elif radius_target > 0.0:
+        # Seed with the corner fillets the material asks for.  A diffusion
+        # relaxation used to do this, but a small section (a 12 mm square with a
+        # 6 mm bend) has no room for it: the corner collapses instead of
+        # rounding, the fit starts in a fold and ends up crossing itself, and
+        # the host throws the whole slice away as "unprocessed".  Tangent arcs
+        # cannot fold, and ``fillet_corners`` clamps the radius to the room the
+        # corner really has - which is also the honest radius to solve for.
+        seed_polygon, _seed_warnings = fillet_corners(
+            source,
+            closed,
+            radius_target,
+            SEED_MIN_TURN_DEG,
+            arc_segments=8,
+            mode="clamp",
+        )
+        achieved = min_radius(seed_polygon, closed)
+        if achieved is not None and achieved > 0.0:
+            radius_target = min(radius_target, float(achieved))
+        seed = resample_by_count(seed_polygon, closed, n)
     else:
         seed = base
     if len(seed) != n:
         seed = resample_by_count(seed, closed, n)
+    stats["radius_target_mm"] = radius_target
     x: list[float] = []
     for px, py in seed:
         x.extend((px, py))
@@ -485,7 +503,7 @@ def optimize_curve(
     w_smooth = (
         w_data * smooth_length**4 / ds**4 if smooth_length > 0.0 else 0.0
     )
-    max_curvature = 1.0 / min_radius_mm if min_radius_mm and min_radius_mm > 0 else 0.0
+    max_curvature = 1.0 / radius_target if radius_target > 0.0 else 0.0
     w_radius = max(0.0, float(radius_weight)) * ds
     rows = range(n) if closed else range(1, n - 1)
 
@@ -593,6 +611,13 @@ def optimize_curve(
             break
 
     result = [(x[2 * i], x[2 * i + 1]) for i in range(n)]
+    # A fit that folds over itself is unusable and the host rejects the slice:
+    # the fillet seed (rounded, no crossings) is a much better answer than a
+    # crumpled curve, so keep it when the solve went bad.
+    if _crosses(result, closed) and not _crosses(seed, closed):
+        result = [tuple(point) for point in seed]
+        message = "kept the fillet seed (the fit crossed itself)"
+        success = False
     radii = min_radius(result, closed)
     # Report the objective at the returned points, not at the state before the
     # last accepted step.

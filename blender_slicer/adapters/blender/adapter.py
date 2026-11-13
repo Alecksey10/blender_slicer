@@ -120,6 +120,17 @@ def validate_settings(settings) -> None:
             errors.append("Inertia passes cannot be negative")
         if settings.smooth_curve_min_radius_mm < 0:
             errors.append("Min radius cannot be negative")
+    if getattr(settings, "tube_path_enabled", False):
+        if settings.tube_path_rod_radius_mm < 0:
+            errors.append("Rod radius cannot be negative")
+        if settings.tube_path_cross_section_step_mm <= 0:
+            errors.append("Cross-section step must be positive")
+        if not (0.0 <= settings.tube_path_tension <= 1.0):
+            errors.append("Curve tension must be in [0, 1]")
+        if settings.tube_path_contact_tolerance_mm < 0:
+            errors.append("Contact tolerance cannot be negative")
+        if settings.tube_path_arc_segments < 1:
+            errors.append("Arc segments must be >= 1")
     if getattr(settings, "optimize_enabled", False):
         if getattr(settings, "optimize_points", 0) < 8:
             errors.append("Curve samples must be >= 8")
@@ -279,6 +290,28 @@ def operations_from_settings(settings) -> list[OperationSpec]:
                         settings.smooth_curve_inertia_smoothing
                     ),
                     "inertia": float(settings.smooth_curve_inertia),
+                },
+            )
+        )
+    if legacy_shaping and getattr(settings, "tube_path_enabled", False):
+        operations.append(
+            _operation(
+                "tube_path",
+                {
+                    "rod_radius_mm": float(settings.tube_path_rod_radius_mm),
+                    "side": str(settings.tube_path_side),
+                    "use_cross_sections": bool(
+                        settings.tube_path_use_cross_sections
+                    ),
+                    "cross_section_step_mm": float(
+                        settings.tube_path_cross_section_step_mm
+                    ),
+                    "guide_group_tag": str(settings.tube_path_guide_group_tag),
+                    "contact_tolerance_mm": float(
+                        settings.tube_path_contact_tolerance_mm
+                    ),
+                    "tension": float(settings.tube_path_tension),
+                    "arc_segments": int(settings.tube_path_arc_segments),
                 },
             )
         )

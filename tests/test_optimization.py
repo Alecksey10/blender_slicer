@@ -431,5 +431,81 @@ class EngineIntegrationTests(unittest.TestCase):
         )
 
 
+def _process(points, radius: float = 6.0):
+    """Run only the optimizer over one contour and return its slice result."""
+
+    engine = Engine()
+    slice_ = Slice(
+        id="s0",
+        index=0,
+        contours=[
+            Contour(
+                "s0.c0",
+                ContourRole.CUT,
+                True,
+                [(float(x), float(y)) for x, y in points],
+            )
+        ],
+    )
+    request = ProcessingRequest(
+        request_id="small",
+        slices=[slice_],
+        operations=[
+            OperationSpec(
+                method="optimize_curve",
+                params={
+                    "sample_points": 150,
+                    "min_radius_mm": radius,
+                    "radius_weight": 1000.0,
+                    "max_iterations": 40,
+                },
+            )
+        ],
+    )
+    result = engine.process(request)
+    return result, result.slices[0].contours[0]
+
+
+class SmallSectionTests(unittest.TestCase):
+    """A section too small for the material radius must still be shaped.
+
+    Corners used to collapse when the bend radius did not fit (a 12 mm square
+    with a 6 mm bend, a 3 mm wide slot), the fit crossed itself, and the runner
+    dropped the whole slice - which the user saw as "some slices are simply
+    rectangular, as if untouched".
+    """
+
+    def test_small_square_is_rounded_instead_of_returned_raw(self):
+        result, contour = _process([(0, 0), (12, 0), (12, 12), (0, 12)])
+        self.assertEqual(result.status, ResultStatus.OK)
+        self.assertTrue(contour.changed)
+        self.assertEqual(len(contour.points), 150)
+        self.assertGreater(contour.metrics.min_radius_mm, 5.0)
+        self.assertLess(contour.metrics.max_turn_deg, 40.0)
+
+    def test_sharp_corner_of_a_tiny_section_is_still_rounded(self):
+        result, contour = _process([(0, 0), (8, 0), (8, 8), (0, 8)])
+        self.assertEqual(result.status, ResultStatus.OK)
+        self.assertTrue(contour.changed)
+        # 8 mm of material cannot hold a 6 mm bend: at most half the side fits.
+        self.assertGreater(contour.metrics.min_radius_mm, 3.3)
+        self.assertLess(contour.metrics.max_turn_deg, 40.0)
+
+    def test_narrow_slot_rounds_to_what_its_width_allows(self):
+        result, contour = _process([(0, 0), (100, 0), (100, 3), (0, 3)])
+        self.assertEqual(result.status, ResultStatus.OK)
+        self.assertTrue(contour.changed)
+        self.assertGreater(contour.metrics.min_radius_mm, 1.2)
+        self.assertLess(contour.metrics.min_radius_mm, 1.7)
+
+    def test_impossible_radius_is_explained_once(self):
+        result, _contour = _process([(0, 0), (100, 0), (100, 3), (0, 3)])
+        messages = [d.message for d in result.slices[0].diagnostics]
+        self.assertTrue(any("does not fit this section" in text for text in messages))
+        self.assertFalse(
+            any(d.severity.value == "error" for d in result.slices[0].diagnostics)
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

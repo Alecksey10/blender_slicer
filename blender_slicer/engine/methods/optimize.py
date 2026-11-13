@@ -192,18 +192,35 @@ class OptimizeCurveMethod(Method):
             )
 
         smallest = stats.get("min_radius_mm")
-        # A fit that lands within 2% of the limit is a success, not a warning:
-        # reporting 5.999 against 6.000 is noise the user cannot act on.
-        if radius > 0.0 and smallest is not None and smallest < radius * 0.98:
+        target = float(stats.get("radius_target_mm", radius) or radius)
+        # The section itself may not allow the material radius (a 3 mm wide slot
+        # cannot bend over 6 mm): saying so once is far more useful than
+        # reporting the same number as a failure on every slice.
+        if radius > 0.0 and target > 0.0 and target < radius * 0.999:
             ctx.warn(
                 ErrorCode.E_CONSTRAINT_UNSATISFIED,
                 (
-                    f"Bend radius {smallest:.4f} mm is below the {radius:.4f} mm "
+                    f"Bend radius {radius:.3f} mm does not fit this section: the "
+                    f"corners allow {target:.3f} mm, so the curve is fitted to that"
+                ),
+                details={
+                    "requested_radius_mm": radius,
+                    "fit_radius_mm": target,
+                    "method": self.descriptor.name,
+                },
+            )
+        # A fit that lands within 2% of the limit is a success, not a warning:
+        # reporting 5.999 against 6.000 is noise the user cannot act on.
+        if target > 0.0 and smallest is not None and smallest < target * 0.98:
+            ctx.warn(
+                ErrorCode.E_CONSTRAINT_UNSATISFIED,
+                (
+                    f"Bend radius {smallest:.4f} mm is below the {target:.4f} mm "
                     "minimum; the curve was fitted as close as the material allows"
                 ),
                 details={
                     "min_radius_mm": smallest,
-                    "limit_mm": radius,
+                    "limit_mm": target,
                     "violations": stats.get("violations", 0),
                     "method": self.descriptor.name,
                 },

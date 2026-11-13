@@ -335,6 +335,71 @@ class SlicerSettings(bpy.types.PropertyGroup):
         update=_mark_dirty,
     )
 
+    # -------------------------------------------------- tube path (group B)
+    tube_path_enabled: bpy.props.BoolProperty(
+        name="Tube path (group B)", default=False, update=_mark_dirty
+    )
+    tube_path_rod_radius_mm: bpy.props.FloatProperty(
+        name="Rod radius (mm)",
+        description="Radius of the rod/tube; centreline is offset by this from the guide",
+        default=3.0,
+        min=0.0,
+        step=0.1,
+        update=_mark_dirty,
+    )
+    tube_path_side: bpy.props.EnumProperty(
+        name="Offset side",
+        items=(
+            ("outer", "Outer", "Rod centre to the left of travel (outside the guide)"),
+            ("inner", "Inner", "Rod centre to the right of travel (inside the guide)"),
+            ("center", "Center", "No offset — centreline follows the guide"),
+        ),
+        default="outer",
+        update=_mark_dirty,
+    )
+    tube_path_use_cross_sections: bpy.props.BoolProperty(
+        name="Use cross-sections",
+        description="Build contact points in perpendicular planes across neighbouring slices",
+        default=False,
+        update=_mark_dirty,
+    )
+    tube_path_cross_section_step_mm: bpy.props.FloatProperty(
+        name="Cross-section step (mm)",
+        default=5.0,
+        min=0.5,
+        step=0.5,
+        update=_mark_dirty,
+    )
+    tube_path_guide_group_tag: bpy.props.StringProperty(
+        name="Guide group tag",
+        description="Tag identifying group-A guide contours across slices",
+        default="group_a",
+        update=_mark_dirty,
+    )
+    tube_path_contact_tolerance_mm: bpy.props.FloatProperty(
+        name="Contact tolerance (mm)",
+        default=0.05,
+        min=0.0,
+        step=0.01,
+        update=_mark_dirty,
+    )
+    tube_path_tension: bpy.props.FloatProperty(
+        name="Curve tension",
+        default=0.5,
+        min=0.0,
+        max=1.0,
+        step=0.05,
+        update=_mark_dirty,
+    )
+    tube_path_arc_segments: bpy.props.IntProperty(
+        name="Arc segments",
+        default=8,
+        min=1,
+        max=64,
+        step=1,
+        update=_mark_dirty,
+    )
+
     # ---------------------------------------------------------------- simplify
     simplify_enabled: bpy.props.BoolProperty(name="Simplify", default=True, update=_mark_dirty)
     simplify_tolerance_mm: bpy.props.FloatProperty(

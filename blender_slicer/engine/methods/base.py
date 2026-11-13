@@ -9,8 +9,14 @@ from ...protocol.types import (
     ErrorCode,
     MaterialProfile,
     Severity,
+    Slice,
 )
 from ..progress import ProgressReporter
+
+try:  # CoordinateFrame lives in the host-adapter layer; keep it optional.
+    from ..spatial.frames import CoordinateFrame  # type: ignore
+except Exception:  # pragma: no cover - host may not be installed
+    CoordinateFrame = None  # type: ignore[assignment]
 
 
 @dataclass
@@ -22,6 +28,10 @@ class MethodContext:
     contour_id: str | None = None
     slice_offset_mm: float = 0.0
     slice_metadata: dict = field(default_factory=dict)
+    #: All slices of the current request (for cross-slice / cross-frame ops).
+    all_slices: list[Slice] | None = None
+    #: frame_id -> CoordinateFrame, for translating between 2D slice planes.
+    slice_frames: dict | None = None
     #: Live monitor of a long method; ``None`` means "run silently".
     progress: ProgressReporter | None = None
     slice_index: int = -1

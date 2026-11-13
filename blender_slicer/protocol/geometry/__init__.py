@@ -76,6 +76,13 @@ from .thin import (
     cut_thin_sections,
 )
 
+from .tube import (
+    circle_tangent_point,
+    interpolate_guide,
+    rod_centre_path,
+    tangent_offset_points,
+)
+
 from .sheet import (
     bend_allowance_mm,
 )
@@ -135,6 +142,10 @@ __all__ = [
     "trim_tight_corners",
     "cut_thin_sections",
     "bend_allowance_mm",
+    "circle_tangent_point",
+    "interpolate_guide",
+    "rod_centre_path",
+    "tangent_offset_points",
     "curve_curvature",
     "optimize_curve",
     "resample_by_count",
